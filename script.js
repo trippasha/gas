@@ -70,7 +70,7 @@ class GasMonitor {
         const tbody = document.getElementById('tableBody');
         tbody.innerHTML = '';
 
-        // Додаємо початкові дані з скріншоту
+        // Початкові дані з скріншоту
         const initialData = [
             { date: '2022-11-22', gasReading: 73435, temperature: 4.5, difference: 0 },
             { date: '2022-11-23', gasReading: 73455, temperature: -1, difference: 20 },
@@ -78,10 +78,8 @@ class GasMonitor {
             { date: '2022-11-25', gasReading: 73484, temperature: 3, difference: 13 }
         ];
 
-        // Об'єднуємо початкові дані з поточними
-        const allData = [...initialData, ...this.data];
-
-        allData.forEach((entry, index) => {
+        // Відображаємо спочатку початкові дані, потім дані з localStorage
+        [...initialData, ...this.data].forEach((entry, index) => {
             const row = document.createElement('tr');
             
             const differenceClass = entry.difference > 0 ? 'difference-positive' : 
@@ -110,14 +108,16 @@ class GasMonitor {
     renderChart() {
         const ctx = document.getElementById('gasChart').getContext('2d');
         
-        // Об'єднуємо дані для графіка
-        const allData = [
+        // Початкові дані з скріншоту
+        const initialData = [
             { date: '2022-11-22', gasReading: 73435, temperature: 4.5, difference: 0 },
             { date: '2022-11-23', gasReading: 73455, temperature: -1, difference: 20 },
             { date: '2022-11-24', gasReading: 73471, temperature: 0, difference: 16 },
             { date: '2022-11-25', gasReading: 73484, temperature: 3, difference: 13 }
-            ...this.data
-        ].filter(entry => entry.temperature !== null);
+        ];
+
+        // Об'єднуємо початкові дані з даними з localStorage
+        const allData = [...initialData, ...this.data].filter(entry => entry.temperature !== null);
 
         const labels = allData.map(entry => this.formatDate(entry.date));
         const differences = allData.map(entry => entry.difference);

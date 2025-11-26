@@ -14,54 +14,34 @@
         </header>
 
         <main>
-            <section class="input-section">
-                <h2>Додати нові показники</h2>
-                <form id="dataForm">
-                    <div class="form-group">
-                        <label for="date">Дата:</label>
-                        <input type="date" id="date" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="gasReading">Показник газу:</label>
-                        <input type="number" id="gasReading" step="0.01" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="temperature">Температура (°C):</label>
-                        <input type="number" id="temperature" step="0.1" required>
-                    </div>
-                    <button type="submit">Зберегти</button>
-                </form>
-            </section>
-
-            <section class="data-section">
-                <h2>Історія показників</h2>
-                <div class="table-container">
-                    <table id="dataTable">
-                        <thead>
-                            <tr>
-                                <th>Різниця</th>
-                                <th>Дата</th>
-                                <th>Показник газу</th>
-                                <th>Температура</th>
-                                <th>Дії</th>
-                            </tr>
-                        </thead>
-                        <tbody id="tableBody">
-                            <!-- Дані будуть додаватися динамічно -->
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
-            <section class="chart-section">
-                <h2>Графік різниці показників газу та температури</h2>
-                <div class="chart-container">
-                    <canvas id="gasChart"></canvas>
-                </div>
-            </section>
-        </main>
+            </main>
     </div>
 
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+        import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+        // getAnalytics вилучено для спрощення, якщо не потрібне
+
+        // Ваша конфігурація
+        const firebaseConfig = {
+            apiKey: "AIzaSyBljzKUEOAMc8AbBU-5wnkm6AIQPmLbVuo",
+            authDomain: "winter-gas.firebaseapp.com",
+            projectId: "winter-gas",
+            storageBucket: "winter-gas.firebasestorage.app",
+            messagingSenderId: "263460066412",
+            appId: "1:263460066412:web:a0697a86f3504674407449",
+            measurementId: "G-HBD0JQ2R7X"
+        };
+
+        // Ініціалізація Firebase
+        const app = initializeApp(firebaseConfig);
+        
+        // Ініціалізація Firestore та приєднання його до глобального об'єкта window
+        window.db = getFirestore(app);
+        
+        console.log("Firebase та Firestore ініціалізовано.");
+    </script>
+    
     <script src="script.js"></script>
 </body>
 </html>

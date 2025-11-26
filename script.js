@@ -1,31 +1,116 @@
+// Оскільки цей файл є класичним скриптом, ми використовуємо 'await import'
+// для отримання функцій Firestore усередині async-функцій.
+
 class GasMonitor {
     constructor() {
-        this.data = this.loadData();
+        // Перевіряємо, чи ініціалізовано Firebase
+        if (!window.db) {
+            console.error("Firebase Firestore не доступно. Перевірте index.html.");
+            return;
+        }
+        this.db = window.db;
+        this.data = []; // Дані, завантажені з Firebase
+        this.collectionName = "gas_readings";
         this.init();
     }
 
-    init() {
+    async init() {
         this.setMinDate();
-        this.renderTable();
-        this.renderChart();
+        await this.loadGasDataFromFirebase(); // Асинхронне завантаження даних
         this.setupEventListeners();
     }
 
-    setMinDate() {
-        const dateInput = document.getElementById('date');
-        const today = new Date().toISOString().split('T')[0];
-        dateInput.value = today;
-        dateInput.max = today;
+    // --- Нова логіка для Firestore ---
+
+    // Функція для завантаження всіх даних з Firestore
+    async loadGasDataFromFirebase() {
+        try {
+            // Імпортуємо необхідні функції Firestore
+            const { collection, query, orderBy, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+
+            // Отримуємо посилання на колекцію, сортуючи за часом створення
+            const q = query(collection(this.db, this.collectionName), orderBy("timestamp", "asc"));
+            
+            const querySnapshot = await getDocs(q);
+            const loadedData = [];
+            
+            querySnapshot.forEach((doc) => {
+                const data = doc.data();
+                loadedData.push({
+                    id: doc.id, // Зберігаємо ID для подальшого видалення
+                    date: data.date,
+                    gasReading: data.gasReading,
+                    temperature: data.temperature,
+                    timestamp: data.timestamp ? data.timestamp.toDate() : null
+                });
+            });
+
+            this.data = loadedData;
+            this.render(); // Оновлюємо таблицю та графік після завантаження
+            
+        } catch (error) {
+            console.error("Помилка завантаження даних з Firebase:", error);
+            alert("Помилка завантаження даних. Перевірте консоль.");
+        }
     }
 
-    setupEventListeners() {
-        document.getElementById('dataForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.addData();
-        });
+    // Функція для збереження даних у Firestore
+    async saveGasDataToFirebase(newEntry) {
+        try {
+            const { collection, addDoc, serverTimestamp } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+            
+            const dataToSave = {
+                date: newEntry.date,
+                gasReading: newEntry.gasReading,
+                temperature: newEntry.temperature,
+                timestamp: serverTimestamp() // Час, встановлений сервером
+            };
+
+            const docRef = await addDoc(collection(this.db, this.collectionName), dataToSave);
+            
+            // Додаємо новий запис з ID до локального масиву для негайного відображення
+            this.data.push({
+                ...newEntry, 
+                id: docRef.id,
+                timestamp: new Date()
+            }); 
+            
+            this.render();
+
+        } catch (error) {
+            console.error("Помилка запису даних до Firebase:", error);
+            alert("Помилка збереження даних. Перевірте консоль.");
+        }
+    }
+    
+    // Функція для видалення даних з Firestore
+    async deleteDataFromFirebase(docId) {
+        try {
+            const { doc, deleteDoc } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+            
+            await deleteDoc(doc(this.db, this.collectionName, docId));
+            
+            // Видаляємо з локального масиву
+            this.data = this.data.filter(entry => entry.id !== docId);
+            
+            this.render();
+
+        } catch (error) {
+            console.error("Помилка видалення даних з Firebase:", error);
+            alert("Помилка видалення даних. Перевірте консоль.");
+        }
+    }
+    
+    // --- Модифікація існуючих методів ---
+    
+    // Викликається після loadGasDataFromFirebase
+    render() {
+        this.renderTable();
+        this.renderChart();
     }
 
-    addData() {
+    // addData тепер асинхронний і викликає saveGasDataToFirebase
+    async addData() {
         const date = document.getElementById('date').value;
         const gasReading = parseFloat(document.getElementById('gasReading').value);
         const temperature = parseFloat(document.getElementById('temperature').value);
@@ -39,30 +124,106 @@ class GasMonitor {
             date,
             gasReading,
             temperature,
-            difference: this.calculateDifference(gasReading)
         };
 
-        this.data.push(newEntry);
-        this.saveData();
-        this.renderTable();
-        this.renderChart();
+        // Зберігаємо дані в бекенд (асинхронно)
+        await this.saveGasDataToFirebase(newEntry);
+        
+        // Очищення форми
         document.getElementById('dataForm').reset();
         this.setMinDate();
     }
-
-    calculateDifference(currentReading) {
-        if (this.data.length === 0) {
-            // Якщо це перший запис, перевіряємо початкові дані
-            const initialData = this.getInitialData();
-            if (initialData.length > 0) {
-                const lastInitial = initialData[initialData.length - 1];
-                return currentReading - lastInitial.gasReading;
-            }
-            return 0;
-        }
+    
+    // Метод для розрахунку різниці
+    getAllData() {
+        // Початкові дані, які не зберігаються у Firebase
+        const initialData = this.getInitialData(); 
         
-        const lastReading = this.data[this.data.length - 1].gasReading;
-        return currentReading - lastReading;
+        // Об'єднуємо початкові дані та дані з Firebase
+        const combinedData = [...initialData, ...this.data];
+        
+        // Перераховуємо різниці
+        return combinedData.map((entry, index) => {
+            let difference = 0;
+            
+            if (index > 0) {
+                // Віднімаємо від попереднього запису в об'єднаному масиві
+                const lastEntry = combinedData[index - 1];
+                difference = entry.gasReading - lastEntry.gasReading;
+            } else if (entry.difference !== undefined) {
+                // Якщо це перший запис, використовуємо його difference (якщо є)
+                difference = entry.difference;
+            }
+            
+            return {
+                ...entry,
+                difference: parseFloat(difference.toFixed(2))
+            };
+        });
+    }
+
+    // Метод видалення тепер повинен використовувати Firebase ID
+    deleteData(entryIndex) {
+        const initialDataLength = this.getInitialData().length;
+
+        if (entryIndex < initialDataLength) {
+            alert('Початкові дані не можуть бути видалені. Це лише приклад.');
+            return;
+        }
+
+        // Індекс у масиві this.data (дані, завантажені з Firebase)
+        const firebaseIndex = entryIndex - initialDataLength;
+        const entryToDelete = this.data[firebaseIndex];
+
+        if (entryToDelete && confirm(`Ви впевнені, що хочете видалити запис від ${this.formatDate(entryToDelete.date)}?`)) {
+            // Викликаємо функцію видалення з Firebase
+            this.deleteDataFromFirebase(entryToDelete.id);
+        }
+    }
+    
+    // Видаляємо старі методи localStorage
+    // loadData() {}
+    // saveData() {}
+
+    // ... (setMinDate, setupEventListeners, getInitialData, formatDate, renderChart залишаються незмінними) ...
+    
+    // Виправлений renderTable для коректного відображення ID та кнопки
+    renderTable() {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '';
+
+        const allData = this.getAllData();
+        const initialDataLength = this.getInitialData().length;
+
+        allData.forEach((entry, index) => {
+            const row = document.createElement('tr');
+            
+            const differenceClass = entry.difference > 0 ? 'difference-positive' : 
+                                  entry.difference < 0 ? 'difference-negative' : 'difference-zero';
+            
+            const isDeletable = index >= initialDataLength;
+
+            row.innerHTML = `
+                <td class="${differenceClass}">${entry.difference}</td>
+                <td>${this.formatDate(entry.date)}</td>
+                <td>${entry.gasReading}</td>
+                <td>${entry.temperature !== null ? entry.temperature + '°C' : 'Н/Д'}</td>
+                <td>
+                    ${isDeletable ? 
+                        `<button class="delete-btn" onclick="gasMonitor.deleteData(${index})">Видалити</button>` : 
+                        ''
+                    }
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    setMinDate() {
+        const dateInput = document.getElementById('date');
+        const today = new Date().toISOString().split('T')[0];
+        dateInput.value = today;
+        dateInput.max = today;
     }
 
     getInitialData() {
@@ -73,69 +234,7 @@ class GasMonitor {
             { date: '2022-11-25', gasReading: 73484, temperature: 3, difference: 13 }
         ];
     }
-
-    getAllData() {
-        const initialData = this.getInitialData();
-        // Перераховуємо різниці для всіх даних
-        const allData = [...initialData];
-        
-        // Додаємо дані з localStorage та перераховуємо різниці
-        this.data.forEach((entry, index) => {
-            let difference;
-            if (index === 0) {
-                // Перший запис з localStorage - віднімаємо від останнього початкового запису
-                const lastInitial = initialData[initialData.length - 1];
-                difference = entry.gasReading - lastInitial.gasReading;
-            } else {
-                // Наступні записи - віднімаємо від попереднього запису в localStorage
-                difference = entry.gasReading - this.data[index - 1].gasReading;
-            }
-            
-            allData.push({
-                ...entry,
-                difference: difference
-            });
-        });
-
-        return allData;
-    }
-
-    deleteData(index) {
-        if (confirm('Ви впевнені, що хочете видалити цей запис?')) {
-            this.data.splice(index, 1);
-            this.saveData();
-            this.renderTable();
-            this.renderChart();
-        }
-    }
-
-    renderTable() {
-        const tbody = document.getElementById('tableBody');
-        tbody.innerHTML = '';
-
-        const allData = this.getAllData();
-
-        allData.forEach((entry, index) => {
-            const row = document.createElement('tr');
-            
-            const differenceClass = entry.difference > 0 ? 'difference-positive' : 
-                                  entry.difference < 0 ? 'difference-negative' : 'difference-zero';
-            
-            row.innerHTML = `
-                <td class="${differenceClass}">${entry.difference}</td>
-                <td>${this.formatDate(entry.date)}</td>
-                <td>${entry.gasReading}</td>
-                <td>${entry.temperature !== null ? entry.temperature + '°C' : 'Н/Д'}</td>
-                <td>
-                    ${index >= this.getInitialData().length ? 
-                        `<button class="delete-btn" onclick="gasMonitor.deleteData(${index - this.getInitialData().length})">Видалити</button>` : 
-                        ''}
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-    }
-
+    
     formatDate(dateString) {
         const date = new Date(dateString);
         return date.toLocaleDateString('uk-UA');
@@ -182,6 +281,7 @@ class GasMonitor {
                 ]
             },
             options: {
+                // ... (options залишаються незмінними)
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: {
@@ -239,16 +339,16 @@ class GasMonitor {
             }
         });
     }
-
-    saveData() {
-        localStorage.setItem('gasMonitorData', JSON.stringify(this.data));
-    }
-
-    loadData() {
-        const saved = localStorage.getItem('gasMonitorData');
-        return saved ? JSON.parse(saved) : [];
-    }
 }
 
-// Ініціалізація додатку
-const gasMonitor = new GasMonitor();
+// Ініціалізація додатку: перевіряємо, чи DB готова
+document.addEventListener('DOMContentLoaded', () => {
+    // Невеликий тайм-аут, щоб переконатися, що модульний скрипт Firebase завершив роботу
+    setTimeout(() => {
+         if (window.db) {
+             window.gasMonitor = new GasMonitor();
+         } else {
+             console.error("Критична помилка: Firebase DB не доступна. Перевірте, чи виконався <script type=\"module\">");
+         }
+    }, 500); 
+});

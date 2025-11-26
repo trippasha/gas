@@ -226,12 +226,7 @@ class GasMonitor {
                 <td>${this.formatDate(entry.date)}</td>
                 <td>${entry.gasReading}</td>
                 <td>${entry.temperature !== null ? entry.temperature + '°C' : 'Н/Д'}</td>
-                <td>
-                    ${isDeletable ? 
-                        `<button class="delete-btn" onclick="gasMonitor.deleteData(${index})">Видалити</button>` : 
-                        ''
-                    }
-                </td>
+                
             `;
             tbody.appendChild(row);
         });

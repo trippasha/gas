@@ -72,7 +72,7 @@ class GasMonitor {
             this.data.push({
                 ...newEntry, 
                 id: docRef.id,
-                timestamp: new Date()
+                timestamp: serverTimestamp()
             }); 
             
             this.render();

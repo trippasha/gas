@@ -26,7 +26,15 @@ class GasMonitor {
         // 3. Налаштовуємо слухачі
         this.setupEventListeners();
     }
-
+	setupEventListeners() { 
+        const dataForm = document.getElementById('dataForm');
+        if (dataForm) {
+            dataForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.addData();
+            });
+		}
+	}
     // Функція для завантаження всіх даних з Firestore
     async loadGasDataFromFirebase() {
         try {

@@ -14,15 +14,61 @@
         </header>
 
         <main>
-            </main>
+            <section class="form-section">
+                <h2>1. Додати новий показник</h2>
+                <form id="dataForm">
+                    <div class="input-group">
+                        <label for="date">Дата:</label>
+                        <input type="date" id="date" required>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="gasReading">Показник газу (м³):</label>
+                        <input type="number" id="gasReading" required step="any" min="0">
+                    </div>
+                    
+                    <div class="input-group">
+                        <label for="temperature">Температура (°C):</label>
+                        <input type="number" id="temperature" required step="any">
+                    </div>
+                    
+                    <button type="submit" class="submit-btn">Зберегти запис</button>
+                </form>
+            </section>
+            
+            <section class="chart-section">
+                <h2>2. Динаміка показників</h2>
+                <div class="chart-container">
+                    <canvas id="gasChart"></canvas>
+                </div>
+            </section>
+
+            <section class="table-section">
+                <h2>3. Історія показників</h2>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Різниця (м³)</th>
+                                <th>Дата</th>
+                                <th>Показник газу</th>
+                                <th>Температура</th>
+                                <th>Дія</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody">
+                            </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
     </div>
 
     <script type="module">
+        // Ваш код ініціалізації Firebase тут (залишається незмінним)
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
         import { getFirestore } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
-        // getAnalytics вилучено для спрощення, якщо не потрібне
 
-        // Ваша конфігурація
         const firebaseConfig = {
             apiKey: "AIzaSyBljzKUEOAMc8AbBU-5wnkm6AIQPmLbVuo",
             authDomain: "winter-gas.firebaseapp.com",
@@ -33,10 +79,7 @@
             measurementId: "G-HBD0JQ2R7X"
         };
 
-        // Ініціалізація Firebase
         const app = initializeApp(firebaseConfig);
-        
-        // Ініціалізація Firestore та приєднання його до глобального об'єкта window
         window.db = getFirestore(app);
         
         console.log("Firebase та Firestore ініціалізовано.");

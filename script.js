@@ -2,25 +2,30 @@
 // для отримання функцій Firestore усередині async-функцій.
 
 class GasMonitor {
-    constructor() {
-        // Перевіряємо, чи ініціалізовано Firebase
-        if (!window.db) {
-            console.error("Firebase Firestore не доступно. Перевірте index.html.");
-            return;
-        }
-        this.db = window.db;
-        this.data = []; // Дані, завантажені з Firebase
-        this.collectionName = "gas_readings";
-        this.init();
-    }
+    constructor() {
+        // Перевіряємо, чи ініціалізовано Firebase
+        if (!window.db) {
+            console.error("Firebase Firestore не доступно. Перевірте index.html.");
+            return;
+        }
+        this.db = window.db;
+        this.data = []; // Дані, завантажені з Firebase
+        this.collectionName = "gas_readings";
+        // *** ВИДАЛЕНО: this.init(); ***
+    }
 
-    async init() {
-        this.setMinDate();
+    async init() {
+        // *** ВИДАЛЕНО: this.setMinDate(); ***
+        
+        // 1. Встановлюємо дату перед завантаженням (вона повинна бути доступна, оскільки DOMContentLoaded спрацював)
+        this.setMinDate(); 
+        
+        // 2. Завантажуємо дані
         await this.loadGasDataFromFirebase(); // Асинхронне завантаження даних
+        
+        // 3. Налаштовуємо слухачі
         this.setupEventListeners();
-    }
-
-    // --- Нова логіка для Firestore ---
+    }
 
     // Функція для завантаження всіх даних з Firestore
     async loadGasDataFromFirebase() {
@@ -72,7 +77,7 @@ class GasMonitor {
             this.data.push({
                 ...newEntry, 
                 id: docRef.id,
-                timestamp: serverTimestamp()
+                timestamp: new Date() // Використовуємо New Date() для негайного відображення
             }); 
             
             this.render();
@@ -181,11 +186,16 @@ class GasMonitor {
         }
     }
     
-    // Видаляємо старі методи localStorage
-    // loadData() {}
-    // saveData() {}
-
     // ... (setMinDate, setupEventListeners, getInitialData, formatDate, renderChart залишаються незмінними) ...
+    
+    setupEventListeners() {
+        document.getElementById('dataForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.addData();
+        });
+
+        // Слухач для видалення також знаходиться в renderTable через onclick
+    }
     
     // Виправлений renderTable для коректного відображення ID та кнопки
     renderTable() {
@@ -221,6 +231,12 @@ class GasMonitor {
 
     setMinDate() {
         const dateInput = document.getElementById('date');
+        // Перевірка на null тут є обов'язковою!
+        if (!dateInput) {
+            console.error("Елемент 'date' не знайдено. Перевірте, чи є він у HTML.");
+            return; 
+        }
+        
         const today = new Date().toISOString().split('T')[0];
         dateInput.value = today;
         dateInput.max = today;
@@ -281,7 +297,6 @@ class GasMonitor {
                 ]
             },
             options: {
-                // ... (options залишаються незмінними)
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: {
@@ -343,12 +358,14 @@ class GasMonitor {
 
 // Ініціалізація додатку: перевіряємо, чи DB готова
 document.addEventListener('DOMContentLoaded', () => {
-    // Невеликий тайм-аут, щоб переконатися, що модульний скрипт Firebase завершив роботу
-    setTimeout(() => {
-         if (window.db) {
-             window.gasMonitor = new GasMonitor();
-         } else {
-             console.error("Критична помилка: Firebase DB не доступна. Перевірте, чи виконався <script type=\"module\">");
-         }
-    }, 500); 
+    // Невеликий тайм-аут, щоб переконатися, що модульний скрипт Firebase завершив роботу
+    setTimeout(() => {
+         if (window.db) {
+             window.gasMonitor = new GasMonitor();
+             // *** ДОДАНО: Викликаємо init() після створення об'єкта ***
+             window.gasMonitor.init(); 
+         } else {
+             console.error("Критична помилка: Firebase DB не доступна. Перевірте, чи виконався <script type=\"module\">");
+         }
+    }, 500); 
 });

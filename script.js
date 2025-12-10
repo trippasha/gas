@@ -120,6 +120,8 @@ class GasMonitor {
     render() {
         this.renderTable();
         this.renderChart();
+        // Оновлюємо підпис з автоматичною різницею (між першим початковим і останнім введеним)
+        this.updateSummaryDifference();
     }
 
     // addData тепер асинхронний і викликає saveGasDataToFirebase
@@ -361,6 +363,50 @@ class GasMonitor {
                 }
             }
         });
+    }
+
+    // Додає або оновлює поруч із заголовком "2. Динаміка показників" автоматично обчислену різницю
+    updateSummaryDifference() {
+        const initial = this.getInitialData();
+        if (!initial || initial.length === 0) return;
+
+        const firstReading = initial[0].gasReading;
+        const combined = [...initial, ...this.data];
+        if (combined.length === 0) return;
+
+        const lastEntry = combined[combined.length - 1];
+        const lastReading = lastEntry.gasReading;
+        const diff = lastReading - firstReading;
+
+        // Розрахунок кількості днів між першою та останньою датами
+        const parseDate = (d) => {
+            // Якщо дата вже об'єкт Date — повертаємо його, інакше парсимо строку
+            if (d instanceof Date) return d;
+            return new Date(d);
+        };
+        const firstDate = parseDate(initial[0].date);
+        const lastDate = parseDate(lastEntry.date);
+        // різниця в мілісекундах
+        const msDiff = lastDate - firstDate;
+        const daysDiff = isNaN(msDiff) ? null : Math.round(Math.abs(msDiff) / (1000 * 60 * 60 * 24));
+
+        // Шукаємо елемент заголовка, який починається з "2. Динаміка показників"
+        const header = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,div,span'))
+            .find(el => el.textContent && el.textContent.trim().startsWith('2. Динаміка показників'));
+        if (!header) return;
+
+        // Створюємо або оновлюємо елемент з id 'dynamic-diff' поруч із заголовком
+        let info = document.getElementById('dynamic-diff');
+        if (!info) {
+            info = document.createElement('span');
+            info.id = 'dynamic-diff';
+            info.style.marginLeft = '10px';
+            info.style.fontWeight = '600';
+            header.insertAdjacentElement('afterend', info);
+        }
+
+        info.textContent = ` Різниця : ${diff}` +
+                           (daysDiff !== null ? `кб.м.    за ${daysDiff} дн.` : '');
     }
 }
 

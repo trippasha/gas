@@ -252,10 +252,10 @@ class GasMonitor {
 
     getInitialData() {
         return [
-            { date: '2022-11-22', gasReading: 73435, temperature: 4.5, difference: 0 },
-            { date: '2022-11-23', gasReading: 73455, temperature: -1, difference: 20 },
-            { date: '2022-11-24', gasReading: 73471, temperature: 0, difference: 16 },
-            { date: '2022-11-25', gasReading: 73484, temperature: 3, difference: 13 }
+            { date: '2025-11-22', gasReading: 73435, temperature: 4.5, difference: 0 },
+            { date: '2025-11-23', gasReading: 73455, temperature: -1, difference: 20 },
+            { date: '2025-11-24', gasReading: 73471, temperature: 0, difference: 16 },
+            { date: '2025-11-25', gasReading: 73484, temperature: 3, difference: 13 }
         ];
     }
     

@@ -16,27 +16,34 @@
             padding: 12px;
         }
 
+        /* збільшені підписи на 20% */
         .input-group { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-        .input-group label { min-width: 120px; }
+        .input-group label { min-width: 120px; font-size: 1.2em; }
+
         .input-group input {
             flex: 1 1 auto;
             max-width: 100%;
         }
 
         .table-wrapper { overflow-x: auto; }
+        /* збільшити заголовки таблиці та інші текстові елементи на 20% */
         table { width: 100%; border-collapse: collapse; min-width: 600px; }
+        table th { font-size: 1.2em; }
 
-        .chart-container { width: 100%; height: 320px; }
+        /* підвищений блок графіка (на +100%) */
+        .chart-container { width: 100%; height: 640px; }
         .chart-container canvas { width: 100% !important; height: 100% !important; display: block; }
 
         .submit-btn, .delete-btn, input[type="number"], input[type="date"] {
             max-width: 100%;
+            font-size: 1.2em; /* кнопки та полi вводу теж збільшені */
         }
 
         @media (max-width: 700px) {
             .input-group { flex-direction: column; align-items: stretch; }
             .input-group label { min-width: 0; margin-bottom: 6px; }
-            .chart-container { height: 220px; }
+            /* збільшена мобільна висота теж вдвічі від попередньої версії */
+            .chart-container { height: 440px; }
             table { min-width: 520px; }
         }
     </style>

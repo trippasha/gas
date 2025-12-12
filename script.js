@@ -273,7 +273,7 @@ class GasMonitor {
                 <td>${entry.temperature !== null ? entry.temperature + '°C' : 'Н/Д'}</td>
                 <td>
                     ${isDeletable ? 
-                        `<button class="delete-btn" onclick="gasMonitor.deleteData(${index})">Видалити</button>` : 
+                        `<button class="delete-btn" onclick="gasMonitor.deleteData(${index})" aria-label="Видалити запис">✖</button>` : 
                         ''
                     }
                 </td>

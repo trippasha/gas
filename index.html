@@ -40,20 +40,50 @@
             font-size: 0.7em; /* кнопки та полi вводу теж збільшені */
         }
 
-        /* Зменшити розмір шрифту в секції "Історія показників" вдвічі */
-        .table-section table,
-        .table-section th,
-        .table-section td {
-            font-size: 50%;
+        /* Зменшити висоту рядків таблиці в секції Історія показників */
+        .table-section table th,
+        .table-section table td {
+            padding: 4px 6px;
+            line-height: 1.1;
+            vertical-align: middle;
+        }
+        .table-section table thead th {
+            padding-top: 6px;
+            padding-bottom: 6px;
+        }
+        .table-section table tr {
+            /* за замовчуванням висота буде підконтентна, але обмежимо мінімум */
+            min-height: 28px;
         }
 
-        @media (max-width: 700px) {
+        /* Стиль для кнопки-іконки видалення (червоний хрестик) */
+        .delete-btn {
+            background: transparent;
+            border: none;
+            color: #e53e3e;
+            font-size: 1.1em;
+            line-height: 1;
+            padding: 2px 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+        }
+        .delete-btn:hover {
+            background: rgba(229,62,62,0.08);
+        }
+        .delete-btn:active {
+            transform: translateY(1px);
+        }
+
+        @media (max-width: 600px) {
             /* компактніші відступи/підписи на мобільних, щоб все вміщалося по ширині */
             .container { padding: 8px; }
             .input-group { flex-direction: column; align-items: stretch; gap: 6px; }
             .input-group label { min-width: 0; margin-bottom: 6px; font-size: 1.05em; }
             /* мобільна висота графіка теж +50% від попередньої мобільної (440px -> 660px) */
-            .chart-container { height: 660px; }
+            .chart-container { height: 560px; }
             table { min-width: 0; }
         }
     </style>

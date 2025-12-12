@@ -147,6 +147,49 @@ class GasMonitor {
         // Очищення форми
         document.getElementById('dataForm').reset();
         this.setMinDate();
+
+        // Показати подяку користувачу
+        this.showThankYou();
+    }
+    
+    // Показує повідомлення "Дякую Мамо" під формою на кілька секунд
+    showThankYou(durationMs = 3000) {
+        const form = document.getElementById('dataForm');
+        if (!form) return;
+
+        let msg = document.getElementById('thank-you');
+        if (!msg) {
+            msg = document.createElement('div');
+            msg.id = 'thank-you';
+            msg.setAttribute('role', 'status');
+            msg.style.marginTop = '8px';
+            msg.style.padding = '6px 10px';
+            msg.style.background = '#e6ffed';
+            msg.style.border = '1px solid #b7f5c9';
+            msg.style.color = '#065f46';
+            msg.style.borderRadius = '4px';
+            msg.style.fontWeight = '600';
+            msg.style.display = 'inline-block';
+            msg.style.opacity = '0';
+            msg.style.transition = 'opacity 200ms ease';
+            form.appendChild(msg);
+        }
+
+        msg.textContent = 'Дякую Мамо';
+        // показати
+        requestAnimationFrame(() => { msg.style.opacity = '1'; });
+
+        // скасувати попередній таймер якщо був
+        if (msg._hideTimer) {
+            clearTimeout(msg._hideTimer);
+        }
+        msg._hideTimer = setTimeout(() => {
+            msg.style.opacity = '0';
+            // видалити елемент після анімації
+            setTimeout(() => {
+                if (msg && msg.parentNode === form) form.removeChild(msg);
+            }, 250);
+        }, durationMs);
     }
     
     // Метод для розрахунку різниці
@@ -380,15 +423,36 @@ class GasMonitor {
 
         // Розрахунок кількості днів між першою та останньою датами
         const parseDate = (d) => {
-            // Якщо дата вже об'єкт Date — повертаємо його, інакше парсимо строку
             if (d instanceof Date) return d;
+            if (typeof d === 'number') return new Date(d);
             return new Date(d);
         };
         const firstDate = parseDate(initial[0].date);
         const lastDate = parseDate(lastEntry.date);
-        // різниця в мілісекундах
         const msDiff = lastDate - firstDate;
         const daysDiff = isNaN(msDiff) ? null : Math.round(Math.abs(msDiff) / (1000 * 60 * 60 * 24));
+
+        // Обчислення середнього геометричного витрати за день
+        const rates = [];
+        for (let i = 1; i < combined.length; i++) {
+            const prev = combined[i - 1];
+            const cur = combined[i];
+            const prevDate = parseDate(prev.date);
+            const curDate = parseDate(cur.date);
+            const intervalMs = curDate - prevDate;
+            if (!intervalMs || isNaN(intervalMs) || intervalMs <= 0) continue; // пропускаємо некоректні інтервали
+            const daysInterval = intervalMs / (1000 * 60 * 60 * 24); // можна бути дробовим
+            const delta = cur.gasReading - prev.gasReading;
+            const ratePerDay = delta / daysInterval;
+            if (isFinite(ratePerDay) && ratePerDay > 0) rates.push(ratePerDay);
+        }
+
+        let geomMeanText = 'Н/Д';
+        if (rates.length > 0) {
+            const product = rates.reduce((acc, v) => acc * v, 1);
+            const geomMean = Math.pow(product, 1 / rates.length);
+            geomMeanText = `${geomMean.toFixed(2)} м³/д`;
+        }
 
         // Шукаємо елемент заголовка, який починається з "2. Динаміка показників"
         const header = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,div,span'))
@@ -405,8 +469,9 @@ class GasMonitor {
             header.insertAdjacentElement('afterend', info);
         }
 
-        info.textContent = ` Різниця : ${diff}` +
-                           (daysDiff !== null ? `кб.м.    за ${daysDiff} дн.` : '');
+        info.textContent = ` Різниця: ${diff} м³` +
+                           (daysDiff !== null ? `          ${daysDiff} дн.` : '') +
+                           ` ·       Середня витрати: ${geomMeanText}`;
     }
 }
 

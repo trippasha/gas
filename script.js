@@ -47,9 +47,19 @@ class GasMonitor {
         // Toggle Show All
         const toggleBtn = document.getElementById('toggleShowAll');
         if (toggleBtn) {
-            toggleBtn.addEventListener('click', () => {
-                this.showAll = !this.showAll;
+            // Встановимо початковий текст відповідно до стану
+            const updateToggleText = () => {
                 toggleBtn.textContent = this.showAll ? 'Показати останні 15 дн.' : 'Показати всі дані';
+                toggleBtn.setAttribute('aria-pressed', String(this.showAll));
+            };
+            updateToggleText();
+
+            // Підключаємо слухач для кліку. Використовуємо preventDefault() на випадок, якщо кнопка має тип submit
+            toggleBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.showAll = !this.showAll;
+                updateToggleText();
+                // Оновити графік
                 this.render();
             });
         }
@@ -585,33 +595,63 @@ class GasMonitor {
 	// ...existing surrounding code...
 	const ctx = document.getElementById('gasChart').getContext('2d');
 
-	const allData = this.getAllData(); // містить difference, date, gasReading, temperature
-	const { map } = this.computeDailyAverages();
+    const fullData = this.getAllData(); // містить difference, date, gasReading, temperature
+    const { map } = this.computeDailyAverages();
 
-	// формуємо масив точок для gas (використовуємо timestamp з this.data або date fallback)
-	const gasPoints = allData.map(e => {
-		// e.timestamp може бути Date або null; якщо null, спробуємо використати date (день початку)
-		let x = null;
-		if (e.timestamp instanceof Date) x = e.timestamp;
-		else {
-			// date може бути рядком YYYY-MM-DD
-			try {
-				x = new Date(e.date);
-				if (isNaN(x.getTime())) x = null;
-			} catch (err) { x = null; }
-		}
-		return { x, y: e.difference, raw: e };
-	}).filter(p => p.x !== null);
+    // Знайдемо останню доступну дату у повному наборі (якщо нема, використаємо зараз)
+    let lastDate = null;
+    for (let i = fullData.length - 1; i >= 0; i--) {
+        const d = fullData[i].timestamp instanceof Date ? fullData[i].timestamp : new Date(fullData[i].date);
+        if (!isNaN(d.getTime())) { lastDate = d; break; }
+    }
+    if (!lastDate) lastDate = new Date();
 
-	// середні зовнішні по датах — конвертуємо у точки (взяти часову точку на початок дня)
-	const avgPoints = Object.keys(map).map(dateStr => {
-		const dateObj = new Date(dateStr + 'T00:00:00');
-		return { x: dateObj, y: map[dateStr].outdoorAvg };
-	}).filter(p => p.y !== null);
+    // Обчислимо cutoff (для last N днів)
+    let cutoffDate = null;
+    if (lastDate) {
+        cutoffDate = new Date(lastDate);
+        cutoffDate.setDate(cutoffDate.getDate() - this.defaultDays + 1);
+    }
 
-	if (window.gasChartInstance) window.gasChartInstance.destroy();
+    // Використаємо повні дані, але при необхідності обмежимо видиму область осі X
+    const visibleData = fullData;
 
-	window.gasChartInstance = new Chart(ctx, {
+    // формуємо масив точок для gas (використовуємо timestamp з this.data або date fallback)
+    const gasPoints = visibleData.map(e => {
+        let x = null;
+        if (e.timestamp instanceof Date) x = e.timestamp;
+        else {
+            try {
+                x = new Date(e.date);
+                if (isNaN(x.getTime())) x = null;
+            } catch (err) { x = null; }
+        }
+        return { x, y: e.difference, raw: e };
+    }).filter(p => p.x !== null);
+
+    // середні зовнішні по датах — конвертуємо у точки (взяти часову точку на початок дня)
+    const avgPoints = Object.keys(map).map(dateStr => {
+        const dateObj = new Date(dateStr + 'T00:00:00');
+        return { x: dateObj, y: map[dateStr].outdoorAvg };
+    }).filter(p => p.y !== null);
+
+    if (window.gasChartInstance) window.gasChartInstance.destroy();
+
+    // Підготуємо опції осі X з можливими min/max (щоб показувати лише останні N днів)
+    const xAxisOptions = {
+        type: 'time',
+        time: {
+            tooltipFormat: 'dd.MM.yyyy HH:mm',
+            displayFormats: { hour: 'dd.MM HH:mm', day: 'dd.MM' }
+        },
+        distribution: 'linear'
+    };
+    if (!this.showAll && typeof cutoffDate !== 'undefined' && cutoffDate && lastDate) {
+        xAxisOptions.min = cutoffDate;
+        xAxisOptions.max = lastDate;
+    }
+
+    window.gasChartInstance = new Chart(ctx, {
 		type: 'line',
 		data: {
 			datasets: [
@@ -642,15 +682,8 @@ class GasMonitor {
 			responsive: true,
 			maintainAspectRatio: false,
 			interaction: { mode: 'index', intersect: false },
-			scales: {
-				x: {
-					type: 'time',
-					time: {
-						tooltipFormat: 'dd.MM.yyyy HH:mm',
-						displayFormats: { hour: 'dd.MM HH:mm', day: 'dd.MM' }
-					},
-					distribution: 'linear'
-				},
+            scales: {
+                x: xAxisOptions,
 				yGas: {
 					type: 'linear',
 					display: true,

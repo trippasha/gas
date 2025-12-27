@@ -11,20 +11,29 @@ class GasMonitor {
         this.db = window.db;
         this.data = []; // Дані, завантажені з Firebase
         this.collectionName = "gas_readings";
-        // *** ВИДАЛЕНО: this.init(); ***
+        this.showAll = false;
+        this.defaultDays = 15;
+        this.detailChartInstance = null;
+
+        // ДОДАНО: масив для сирих даних з сенсорів та підписка на onSnapshot
+        this.sensorData = [];        // { ts: number, indoor_t: number, outdoor_t: number }
+        this.sensorUnsubscribe = null;
     }
 
     async init() {
-        // *** ВИДАЛЕНО: this.setMinDate(); ***
-        
-        // 1. Встановлюємо дату перед завантаженням (вона повинна бути доступна, оскільки DOMContentLoaded спрацював)
-        this.setMinDate(); 
-        
-        // 2. Завантажуємо дані
-        await this.loadGasDataFromFirebase(); // Асинхронне завантаження даних
-        
-        // 3. Налаштовуємо слухачі
-        this.setupEventListeners();
+        // Встановити дату
+        this.setMinDate();
+
+        // 1) Підписка / завантаження sensor_data (щоб мати температури при побудові графіків)
+        await this.loadSensorDataFromFirebase();
+
+        // 2) Завантажуємо дані газу
+        await this.loadGasDataFromFirebase();
+
+        // 3) Слухачі та рендер
+        this.setupEventListeners();
+        this.render();
+        this.renderDetailedChart(7); // початковий період — 7 днів у детальному табі
     }
 	setupEventListeners() { 
         const dataForm = document.getElementById('dataForm');
@@ -34,38 +43,102 @@ class GasMonitor {
                 this.addData();
             });
 		}
-	}
-    // Функція для завантаження всіх даних з Firestore
-    async loadGasDataFromFirebase() {
-        try {
-            // Імпортуємо необхідні функції Firestore
-            const { collection, query, orderBy, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
 
-            // Отримуємо посилання на колекцію, сортуючи за часом створення
-            const q = query(collection(this.db, this.collectionName), orderBy("timestamp", "asc"));
-            
-            const querySnapshot = await getDocs(q);
-            const loadedData = [];
-            
-            querySnapshot.forEach((doc) => {
-                const data = doc.data();
-                loadedData.push({
-                    id: doc.id, // Зберігаємо ID для подальшого видалення
-                    date: data.date,
-                    gasReading: data.gasReading,
-                    temperature: data.temperature,
-                    timestamp: data.timestamp ? data.timestamp.toDate() : null
-                });
+        // Toggle Show All
+        const toggleBtn = document.getElementById('toggleShowAll');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                this.showAll = !this.showAll;
+                toggleBtn.textContent = this.showAll ? 'Показати останні 15 дн.' : 'Показати всі дані';
+                this.render();
             });
-
-            this.data = loadedData;
-            this.render(); // Оновлюємо таблицю та графік після завантаження
-            
-        } catch (error) {
-            console.error("Помилка завантаження даних з Firebase:", error);
-            alert("Помилка завантаження даних. Перевірте консоль.");
         }
+
+        // Tab switching
+        const tabOverview = document.getElementById('tabOverview');
+        const tabDetail = document.getElementById('tabDetail');
+        const overviewPanel = document.getElementById('overviewPanel');
+        const detailPanel = document.getElementById('detailPanel');
+
+        if (tabOverview && tabDetail) {
+            tabOverview.addEventListener('click', () => {
+                tabOverview.setAttribute('aria-pressed','true');
+                tabDetail.setAttribute('aria-pressed','false');
+                overviewPanel.style.display = '';
+                detailPanel.style.display = 'none';
+                this.render(); // оновити overview
+            });
+            tabDetail.addEventListener('click', () => {
+                tabOverview.setAttribute('aria-pressed','false');
+                tabDetail.setAttribute('aria-pressed','true');
+                overviewPanel.style.display = 'none';
+                detailPanel.style.display = '';
+                // Відобразити детальний графік (залишаємо поточний період)
+                this.renderDetailedChart(7);
+            });
+        }
+
+        // Period buttons in detail panel
+        const periodButtons = document.querySelectorAll('.period-btn');
+        periodButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const days = parseInt(btn.getAttribute('data-days'), 10) || 7;
+                // Відобразити детальний графік з вибраним періодом
+                this.renderDetailedChart(days);
+            });
+        });
+
+        // Слухач для видалення також знаходиться в renderTable через onclick
     }
+    // Функція для завантаження всіх даних з Firestore
+    // ЗАМІНЕНО: loadGasDataFromFirebase — безпечний парсинг timestamp і збереження Date або null
+	async loadGasDataFromFirebase() {
+		try {
+			const { collection, query, orderBy, getDocs } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+			const q = query(collection(this.db, this.collectionName), orderBy("timestamp", "asc"));
+
+			const querySnapshot = await getDocs(q);
+			const loadedData = [];
+
+			querySnapshot.forEach((doc) => {
+				const data = doc.data();
+
+				// Нормалізація timestamp: рядок ISO/"YYYY-MM-DD HH:MM:SS", Firestore Timestamp, Date, number
+				let ts = null;
+				if (data.timestamp) {
+					if (typeof data.timestamp === 'string') {
+						// пробіл -> T для більшості форматів
+						let s = data.timestamp.replace(' ', 'T');
+						let parsed = new Date(s);
+						if (isNaN(parsed.getTime())) parsed = new Date(Date.parse(data.timestamp));
+						if (isNaN(parsed.getTime())) parsed = new Date(data.timestamp); // ще одна спроба
+						ts = isNaN(parsed.getTime()) ? null : parsed.getTime();
+					} else if (typeof data.timestamp === 'number') {
+						ts = data.timestamp;
+					} else if (data.timestamp && data.timestamp.toDate) {
+						try { ts = data.timestamp.toDate().getTime(); } catch (e) { ts = null; }
+					} else if (data.timestamp instanceof Date) {
+						ts = data.timestamp.getTime();
+					}
+				}
+
+				loadedData.push({
+					id: doc.id,
+					date: data.date,
+					gasReading: data.gasReading,
+					temperature: (data.temperature !== undefined && data.temperature !== null) ? Number(data.temperature) : null,
+					// зберігаємо Date або null
+					timestamp: ts ? new Date(ts) : null
+				});
+			});
+
+			this.data = loadedData;
+			this.render();
+		} catch (error) {
+			console.error("Помилка завантаження даних з Firebase:", error);
+			alert("Помилка завантаження даних. Перевірте консоль.");
+		}
+	}
 
     // Функція для збереження даних у Firestore
     async saveGasDataToFirebase(newEntry) {
@@ -120,17 +193,22 @@ class GasMonitor {
     render() {
         this.renderTable();
         this.renderChart();
-        // Оновлюємо підпис з автоматичною різницею (між першим початковим і останнім введеним)
-        this.updateSummaryDifference();
+        // Якщо зараз відкрито детальний таб — оновимо його також
+        const detailPanel = document.getElementById('detailPanel');
+        if (detailPanel && detailPanel.style.display !== 'none') {
+            // залишимо період 7 днів для оновлення
+            this.renderDetailedChart(7);
+        }
     }
 
     // addData тепер асинхронний і викликає saveGasDataToFirebase
     async addData() {
         const date = document.getElementById('date').value;
         const gasReading = parseFloat(document.getElementById('gasReading').value);
-        const temperature = parseFloat(document.getElementById('temperature').value);
+        // Тепер користувач не вводить температуру — ставимо null (алгоритм обчислить пізніше)
+        const temperature = null;
 
-        if (!date || isNaN(gasReading) || isNaN(temperature)) {
+        if (!date || isNaN(gasReading)) {
             alert('Будь ласка, заповніть всі поля коректно');
             return;
         }
@@ -241,22 +319,15 @@ class GasMonitor {
     
     // ... (setMinDate, setupEventListeners, getInitialData, formatDate, renderChart залишаються незмінними) ...
     
-    setupEventListeners() {
-        document.getElementById('dataForm').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.addData();
-        });
-
-        // Слухач для видалення також знаходиться в renderTable через onclick
-    }
-    
     // Виправлений renderTable для коректного відображення ID та кнопки
     renderTable() {
         const tbody = document.getElementById('tableBody');
+        if (!tbody) return;
         tbody.innerHTML = '';
 
         const allData = this.getAllData();
         const initialDataLength = this.getInitialData().length;
+        const { map } = this.computeDailyAverages();
 
         allData.forEach((entry, index) => {
             const row = document.createElement('tr');
@@ -265,12 +336,14 @@ class GasMonitor {
                                   entry.difference < 0 ? 'difference-negative' : 'difference-zero';
             
             const isDeletable = index >= initialDataLength;
+            const dateKey = (new Date(entry.date)).toISOString().split('T')[0];
+            const tempDisplay = (map[dateKey] && map[dateKey].outdoorAvg !== null) ? (map[dateKey].outdoorAvg + '°C') : 'Н/Д';
 
             row.innerHTML = `
                 <td class="${differenceClass}">${entry.difference}</td>
                 <td>${this.formatDate(entry.date)}</td>
                 <td>${entry.gasReading}</td>
-                <td>${entry.temperature !== null ? entry.temperature + '°C' : 'Н/Д'}</td>
+                <td>${tempDisplay}</td>
                 <td>
                     ${isDeletable ? 
                         `<button class="delete-btn" onclick="gasMonitor.deleteData(${index})" aria-label="Видалити запис">✖</button>` : 
@@ -297,7 +370,7 @@ class GasMonitor {
 
     getInitialData() {
         return [
-            { date: '2025-11-22', gasReading: 73435, temperature: 4.5, difference: 0 },
+            { date: '2025-11-22', gasReading: 73435, temperature: 4.5, difference: 6 },
             { date: '2025-11-23', gasReading: 73455, temperature: -1, difference: 20 },
             { date: '2025-11-24', gasReading: 73471, temperature: 0, difference: 16 },
             { date: '2025-11-25', gasReading: 73484, temperature: 3, difference: 13 }
@@ -309,182 +382,403 @@ class GasMonitor {
         return date.toLocaleDateString('uk-UA');
     }
 
-    renderChart() {
-        const ctx = document.getElementById('gasChart').getContext('2d');
-        
-        const allData = this.getAllData().filter(entry => entry.temperature !== null);
+    // Додаємо допоміжний метод для обчислення середньодобових температур
+    computeDailyAverages() {
+		const toLocalDateStr = (tsOrDate) => {
+			const d = (typeof tsOrDate === 'number') ? new Date(tsOrDate) : new Date(tsOrDate);
+			const y = d.getFullYear();
+			const m = String(d.getMonth() + 1).padStart(2, '0');
+			const day = String(d.getDate()).padStart(2, '0');
+			return `${y}-${m}-${day}`;
+		};
+		const todayStr = toLocalDateStr(new Date());
 
-        const labels = allData.map(entry => this.formatDate(entry.date));
-        const differences = allData.map(entry => entry.difference);
-        const temperatures = allData.map(entry => entry.temperature);
+		// 1) Аггрегація sensorData по даті (YYYY-MM-DD)
+		const groups = {}; // dateStr -> { outdoors: [], indoors: [] }
+		(this.sensorData || []).forEach(p => {
+			const dateStr = toLocalDateStr(p.ts);
+			if (!groups[dateStr]) groups[dateStr] = { outdoors: [], indoors: [] };
+			if (p.outdoor_t !== null && !isNaN(p.outdoor_t)) groups[dateStr].outdoors.push(Number(p.outdoor_t));
+			if (p.indoor_t !== null && !isNaN(p.indoor_t)) groups[dateStr].indoors.push(Number(p.indoor_t));
+		});
 
-        if (window.gasChartInstance) {
-            window.gasChartInstance.destroy();
+		// 2) Додаємо temperature з this.data (gas_readings) як "старі" ручні значення — фолбек для минулих дат
+		const gasTempMap = {}; // dateStr -> last known temperature
+		(this.data || []).forEach(e => {
+			let dateStr = null;
+			if (e.date) {
+				const parsed = new Date(e.date);
+				if (!isNaN(parsed.getTime())) dateStr = toLocalDateStr(parsed);
+			}
+			if (!dateStr && e.timestamp) {
+				const t = (e.timestamp instanceof Date) ? e.timestamp.getTime() : (typeof e.timestamp === 'number' ? e.timestamp : null);
+				if (t) dateStr = toLocalDateStr(t);
+			}
+			if (dateStr && e.temperature !== undefined && e.temperature !== null && !isNaN(Number(e.temperature))) {
+				gasTempMap[dateStr] = Number(e.temperature);
+			}
+		});
+
+		// 3) initialData fallback
+		const initialMap = {};
+		(this.getInitialData() || []).forEach(e => {
+			const dateStr = (e.date instanceof Date) ? toLocalDateStr(e.date) : toLocalDateStr(e.date);
+			if (e.temperature !== undefined && e.temperature !== null && !isNaN(Number(e.temperature))) {
+				if (!initialMap[dateStr]) initialMap[dateStr] = Number(e.temperature);
+			}
+		});
+
+		// 4) Об'єднати всі дати
+		const allDateSet = new Set([ ...Object.keys(groups), ...Object.keys(gasTempMap), ...Object.keys(initialMap) ]);
+		const dateKeys = Array.from(allDateSet).sort();
+
+		const daily = [];
+		const map = {};
+		dateKeys.forEach(dateStr => {
+			const g = groups[dateStr] || { outdoors: [], indoors: [] };
+			let outdoorAvg = null;
+			let indoorAvg = null;
+
+			if (dateStr < todayStr) {
+				// минулі дні: пріоритет gas_readings -> sensorData -> initial
+				if (gasTempMap.hasOwnProperty(dateStr)) {
+					outdoorAvg = gasTempMap[dateStr];
+				} else if (g.outdoors.length > 0) {
+					outdoorAvg = g.outdoors.reduce((a,b)=>a+b,0)/g.outdoors.length;
+				} else if (initialMap.hasOwnProperty(dateStr)) {
+					outdoorAvg = initialMap[dateStr];
+				} else {
+					outdoorAvg = null;
+				}
+				indoorAvg = (g.indoors.length > 0) ? (g.indoors.reduce((a,b)=>a+b,0)/g.indoors.length) : null;
+			} else {
+				// сьогодні і пізніше: тільки sensorData
+				outdoorAvg = (g.outdoors.length > 0) ? (g.outdoors.reduce((a,b)=>a+b,0)/g.outdoors.length) : null;
+				indoorAvg  = (g.indoors.length > 0)  ? (g.indoors.reduce((a,b)=>a+b,0)/g.indoors.length)  : null;
+			}
+
+			const oa = (outdoorAvg !== null && outdoorAvg !== undefined) ? parseFloat(outdoorAvg.toFixed(2)) : null;
+			const ia = (indoorAvg !== null && indoorAvg !== undefined) ? parseFloat(indoorAvg.toFixed(2)) : null;
+
+			daily.push({ dateStr, outdoorAvg: oa, indoorAvg: ia });
+			map[dateStr] = { outdoorAvg: oa, indoorAvg: ia };
+		});
+
+		return { daily, map };
+	}
+
+    // Метод видалення тепер повинен використовувати Firebase ID
+    deleteData(entryIndex) {
+        const initialDataLength = this.getInitialData().length;
+
+        if (entryIndex < initialDataLength) {
+            alert('Початкові дані не можуть бути видалені. Це лише приклад.');
+            return;
         }
 
-        window.gasChartInstance = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'Різниця показників газу',
-                        data: differences,
-                        borderColor: '#667eea',
-                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4,
-                        yAxisID: 'y'
-                    },
-                    {
-                        label: 'Температура (°C)',
-                        data: temperatures,
-                        borderColor: '#e53e3e',
-                        backgroundColor: 'rgba(229, 62, 62, 0.1)',
-                        borderWidth: 2,
-                        fill: true,
-                        tension: 0.4,
-                        yAxisID: 'y1'
+        // Індекс у масиві this.data (дані, завантажені з Firebase)
+        const firebaseIndex = entryIndex - initialDataLength;
+        const entryToDelete = this.data[firebaseIndex];
+
+        if (entryToDelete && confirm(`Ви впевнені, що хочете видалити запис від ${this.formatDate(entryToDelete.date)}?`)) {
+            // Викликаємо функцію видалення з Firebase
+            this.deleteDataFromFirebase(entryToDelete.id);
+        }
+    }
+    
+    // ... (setMinDate, setupEventListeners, getInitialData, formatDate залишаються незмінними) ...
+    
+    // Виправлений renderTable для коректного відображення ID та кнопки
+    renderTable() {
+        const tbody = document.getElementById('tableBody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        const allData = this.getAllData();
+        const initialDataLength = this.getInitialData().length;
+        const { map } = this.computeDailyAverages();
+
+        allData.forEach((entry, index) => {
+            const row = document.createElement('tr');
+            
+            const differenceClass = entry.difference > 0 ? 'difference-positive' : 
+                                  entry.difference < 0 ? 'difference-negative' : 'difference-zero';
+            
+            const isDeletable = index >= initialDataLength;
+            const dateKey = (new Date(entry.date)).toISOString().split('T')[0];
+            const tempDisplay = (map[dateKey] && map[dateKey].outdoorAvg !== null) ? (map[dateKey].outdoorAvg + '°C') : 'Н/Д';
+
+            row.innerHTML = `
+                <td class="${differenceClass}">${entry.difference}</td>
+                <td>${this.formatDate(entry.date)}</td>
+                <td>${entry.gasReading}</td>
+                <td>${tempDisplay}</td>
+                <td>
+                    ${isDeletable ? 
+                        `<button class="delete-btn" onclick="gasMonitor.deleteData(${index})" aria-label="Видалити запис">✖</button>` : 
+                        ''
                     }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
-                },
-                scales: {
-                    y: {
-                        type: 'linear',
-                        display: true,
-                        position: 'left',
-                        title: {
-                            display: true,
-                            text: 'Різниця газу'
-                        }
-                    },
-                    y1: {
-                        type: 'linear',
-                        display: true,
-                        position: 'right',
-                        title: {
-                            display: true,
-                            text: 'Температура (°C)'
-                        },
-                        grid: {
-                            drawOnChartArea: false,
-                        },
-                    }
-                },
-                plugins: {
-                    legend: {
-                        position: 'top',
-                    },
-                    title: {
-                        display: true,
-                        text: 'Динаміка показників газу та температури'
-                    },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                let label = context.dataset.label || '';
-                                if (label) {
-                                    label += ': ';
-                                }
-                                if (context.datasetIndex === 0) {
-                                    label += context.parsed.y + ' (різниця)';
-                                } else {
-                                    label += context.parsed.y + '°C';
-                                }
-                                return label;
-                            }
-                        }
-                    }
-                }
-            }
+                </td>
+            `;
+            tbody.appendChild(row);
         });
     }
 
-    // Додає або оновлює поруч із заголовком "2. Динаміка показників" автоматично обчислену різницю
-    updateSummaryDifference() {
-        const initial = this.getInitialData();
-        if (!initial || initial.length === 0) return;
+    // ЗАМІНЕНО: loadSensorDataFromFirebase — зберігаємо ts як Date та читаємо indoor_h/outdoor_h
+	async loadSensorDataFromFirebase() {
+		try {
+			const { collection, query, orderBy, onSnapshot } = await import("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js");
+			const colRef = collection(this.db, 'sensor_data');
+			const q = query(colRef, orderBy('timestamp', 'asc'));
 
-        const firstReading = initial[0].gasReading;
-        const combined = [...initial, ...this.data];
-        if (combined.length === 0) return;
+			if (this.sensorUnsubscribe) {
+				try { this.sensorUnsubscribe(); } catch (e) { /* ignore */ }
+				this.sensorUnsubscribe = null;
+			}
 
-        const lastEntry = combined[combined.length - 1];
-        const lastReading = lastEntry.gasReading;
-        const diff = lastReading - firstReading;
+			this.sensorUnsubscribe = onSnapshot(q, (snapshot) => {
+				const arr = [];
+				snapshot.forEach(doc => {
+					const d = doc.data();
+					let ts = null;
+					if (d.timestamp) {
+						if (typeof d.timestamp === 'string') {
+							let s = d.timestamp.replace(' ', 'T');
+							let parsed = new Date(s);
+							if (isNaN(parsed.getTime())) parsed = new Date(Date.parse(d.timestamp));
+							ts = isNaN(parsed.getTime()) ? null : parsed.getTime();
+						} else if (typeof d.timestamp === 'number') {
+							ts = d.timestamp;
+						} else if (d.timestamp.toDate) {
+							try { ts = d.timestamp.toDate().getTime(); } catch (e) { ts = null; }
+						} else if (d.timestamp instanceof Date) {
+							ts = d.timestamp.getTime();
+						}
+					}
+					if (ts !== null) {
+						const outdoor_h = (d.outdoor_h !== undefined && d.outdoor_h !== null && !isNaN(Number(d.outdoor_h))) ? Number(d.outdoor_h) : null;
+						const indoor_h  = (d.indoor_h  !== undefined && d.indoor_h  !== null && !isNaN(Number(d.indoor_h)))  ? Number(d.indoor_h)  : null;
 
-        // Розрахунок кількості днів між першою та останньою датами
-        const parseDate = (d) => {
-            if (d instanceof Date) return d;
-            if (typeof d === 'number') return new Date(d);
-            return new Date(d);
-        };
-        const firstDate = parseDate(initial[0].date);
-        const lastDate = parseDate(lastEntry.date);
-        const msDiff = lastDate - firstDate;
-        const daysDiff = isNaN(msDiff) ? null : Math.round(Math.abs(msDiff) / (1000 * 60 * 60 * 24));
+						arr.push({
+							id: doc.id,
+							// зберігаємо Date об'єкт (не number)
+							ts: new Date(ts),
+							indoor_t: (d.indoor_t !== undefined) ? Number(d.indoor_t) : null,
+							outdoor_t: (d.outdoor_t !== undefined) ? Number(d.outdoor_t) : null,
+							indoor_h,
+							outdoor_h
+						});
+					}
+				});
+				this.sensorData = arr.sort((a,b) => a.ts - b.ts);
+				this.render();
+			}, (err) => {
+				console.error("Помилка підписки sensor_data:", err);
+			});
+		} catch (error) {
+			console.error("Помилка завантаження sensor_data:", error);
+		}
+	}
 
-        // Обчислення середнього геометричного витрати за день
-        const rates = [];
-        for (let i = 1; i < combined.length; i++) {
-            const prev = combined[i - 1];
-            const cur = combined[i];
-            const prevDate = parseDate(prev.date);
-            const curDate = parseDate(cur.date);
-            const intervalMs = curDate - prevDate;
-            if (!intervalMs || isNaN(intervalMs) || intervalMs <= 0) continue; // пропускаємо некоректні інтервали
-            const daysInterval = intervalMs / (1000 * 60 * 60 * 24); // можна бути дробовим
-            const delta = cur.gasReading - prev.gasReading;
-            const ratePerDay = delta / daysInterval;
-            if (isFinite(ratePerDay) && ratePerDay > 0) rates.push(ratePerDay);
-        }
+    // ЗАМІНЕНО: renderChart — використовує time scale + розміщує газові точки за timestamp
+    renderChart() {
+	// ...existing surrounding code...
+	const ctx = document.getElementById('gasChart').getContext('2d');
 
-        let geomMeanText = 'Н/Д';
-        if (rates.length > 0) {
-            const product = rates.reduce((acc, v) => acc * v, 1);
-            const geomMean = Math.pow(product, 1 / rates.length);
-            geomMeanText = `${geomMean.toFixed(2)} м³/д`;
-        }
+	const allData = this.getAllData(); // містить difference, date, gasReading, temperature
+	const { map } = this.computeDailyAverages();
 
-        // Шукаємо елемент заголовка, який починається з "2. Динаміка показників"
-        const header = Array.from(document.querySelectorAll('h1,h2,h3,h4,h5,div,span'))
-            .find(el => el.textContent && el.textContent.trim().startsWith('2. Динаміка показників'));
-        if (!header) return;
+	// формуємо масив точок для gas (використовуємо timestamp з this.data або date fallback)
+	const gasPoints = allData.map(e => {
+		// e.timestamp може бути Date або null; якщо null, спробуємо використати date (день початку)
+		let x = null;
+		if (e.timestamp instanceof Date) x = e.timestamp;
+		else {
+			// date може бути рядком YYYY-MM-DD
+			try {
+				x = new Date(e.date);
+				if (isNaN(x.getTime())) x = null;
+			} catch (err) { x = null; }
+		}
+		return { x, y: e.difference, raw: e };
+	}).filter(p => p.x !== null);
 
-        // Створюємо або оновлюємо елемент з id 'dynamic-diff' поруч із заголовком
-        let info = document.getElementById('dynamic-diff');
-        if (!info) {
-            info = document.createElement('span');
-            info.id = 'dynamic-diff';
-            info.style.marginLeft = '10px';
-            info.style.fontWeight = '600';
-            header.insertAdjacentElement('afterend', info);
-        }
+	// середні зовнішні по датах — конвертуємо у точки (взяти часову точку на початок дня)
+	const avgPoints = Object.keys(map).map(dateStr => {
+		const dateObj = new Date(dateStr + 'T00:00:00');
+		return { x: dateObj, y: map[dateStr].outdoorAvg };
+	}).filter(p => p.y !== null);
 
-        info.textContent = ` Різниця: ${diff} м³` +
-                           (daysDiff !== null ? `          ${daysDiff} дн.` : '') +
-                           ` ·       Середня витрати: ${geomMeanText}`;
-    }
+	if (window.gasChartInstance) window.gasChartInstance.destroy();
+
+	window.gasChartInstance = new Chart(ctx, {
+		type: 'line',
+		data: {
+			datasets: [
+				{
+					label: 'Різниця показників газу (м³)',
+					data: gasPoints,
+					borderColor: '#667eea',
+					backgroundColor: 'rgba(102, 126, 234, 0.08)',
+					yAxisID: 'yGas',
+					tension: 0.2,
+					fill: false,
+					pointRadius: 3
+				},
+				{
+					label: 'Середня зовнішня температура (°C)',
+				 data: avgPoints,
+				 borderColor: '#0ea5a4',
+				 backgroundColor: 'rgba(14,165,164,0.08)',
+				 yAxisID: 'yTemp',
+				 tension: 0.3,
+				 spanGaps: true,
+				 fill: false,
+				 pointRadius: 3
+				}
+			]
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			interaction: { mode: 'index', intersect: false },
+			scales: {
+				x: {
+					type: 'time',
+					time: {
+						tooltipFormat: 'dd.MM.yyyy HH:mm',
+						displayFormats: { hour: 'dd.MM HH:mm', day: 'dd.MM' }
+					},
+					distribution: 'linear'
+				},
+				yGas: {
+					type: 'linear',
+					display: true,
+					position: 'left',
+					title: { display: true, text: 'Різниця газу (м³)' }
+				},
+				yTemp: {
+					type: 'linear',
+					display: true,
+					position: 'right',
+					title: { display: true, text: 'Температура (°C)' },
+					grid: { drawOnChartArea: false }
+				}
+			},
+			plugins: {
+				zoom: {
+					pan: { enabled: true, mode: 'x', threshold: 5 },
+					zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+				},
+				legend: { position: 'top' },
+				title: { display: true, text: 'Динаміка газу та середня зовнішня температура' }
+			}
+		}
+	});
+	// ...existing surrounding code...
 }
 
-// Ініціалізація додатку: перевіряємо, чи DB готова
-document.addEventListener('DOMContentLoaded', () => {
-    // Невеликий тайм-аут, щоб переконатися, що модульний скрипт Firebase завершив роботу
-    setTimeout(() => {
-         if (window.db) {
-             window.gasMonitor = new GasMonitor();
-             // *** ДОДАНО: Викликаємо init() після створення об'єкта ***
-             window.gasMonitor.init(); 
-         } else {
-             console.error("Критична помилка: Firebase DB не доступна. Перевірте, чи виконався <script type=\"module\">");
-         }
-    }, 500); 
+// ЗАМІНЕНО: renderDetailedChart — смуги (band) для вологості (верхня) та температури (нижня) з time scale
+// gas точки фільтруються за періодом, обчислення різниці також для відфільтрованих точок
+renderDetailedChart(periodDays = 7) {
+    const canvas = document.getElementById('tempDetailChart');
+    if (!canvas) return;
+
+    const combined = (this.sensorData || []).slice().sort((a,b) => a.ts - b.ts);
+    if (combined.length === 0) return;
+
+    const lastTs = combined[combined.length - 1].ts.getTime();
+    const periodMs = periodDays * 24 * 60 * 60 * 1000;
+    const cutoff = lastTs - periodMs;
+    const filtered = combined.filter(p => p.ts.getTime() >= cutoff);
+
+    // Побудова x/y точок (Chart.js time-ось: {x: Date, y: value})
+    const toPoint = (p, field) => ({ x: p.ts, y: (p[field] !== null && p[field] !== undefined) ? p[field] : null });
+
+    const outdoorsT = filtered.map(p => toPoint(p, 'outdoor_t'));
+    const outdoorsH = filtered.map(p => toPoint(p, 'outdoor_h'));
+    const indoorsT  = filtered.map(p => toPoint(p, 'indoor_t'));
+    const indoorsH  = filtered.map(p => toPoint(p, 'indoor_h'));
+
+    // Газові точки — використовуємо this.data timestamps (як Date) або date fallback
+    const gasPointsAll = (this.data || []).map(e => {
+        let x = null;
+        if (e.timestamp instanceof Date) x = e.timestamp;
+        else if (e.date) {
+            const parsed = new Date(String(e.date) + 'T00:00:00');
+            if (!isNaN(parsed.getTime())) x = parsed;
+        }
+        return { x, y: (e.gasReading !== undefined) ? e.gasReading : null };
+    }).filter(p => p.x !== null);
+
+    // Фільтруємо газові точки по періоду (cutoff..lastTs)
+    const gasPoints = gasPointsAll.filter(p => (p.x.getTime() >= cutoff && p.x.getTime() <= lastTs));
+
+    // Обчислюємо різниці між послідовними газовими точками (тільки для відфільтрованих)
+    const gasDiffPoints = [];
+    for (let i = 0; i < gasPoints.length; i++) {
+        if (i === 0) gasDiffPoints.push({ x: gasPoints[i].x, y: 0 });
+        else gasDiffPoints.push({ x: gasPoints[i].x, y: gasPoints[i].y - gasPoints[i-1].y });
+    }
+
+    if (this.detailChartInstance) this.detailChartInstance.destroy();
+    const ctx = canvas.getContext('2d');
+
+    this.detailChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: [
+                { label: 'Зовнішня темп. (°C)', data: outdoorsT, borderColor: '#0ea5a4', backgroundColor: 'rgba(14,165,164,0.04)', yAxisID: 'yTemp', pointRadius: 2, spanGaps: true },
+                { label: 'Зовнішня вологість (%)', data: outdoorsH, borderColor: 'transparent', backgroundColor: 'rgba(96,165,250,0.36)', yAxisID: 'yTemp', pointRadius: 0, spanGaps: true, fill: '-1' },
+                { label: 'Внутрішня темп. (°C)', data: indoorsT, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.04)', yAxisID: 'yTemp', pointRadius: 2, spanGaps: true },
+                { label: 'Внутрішня вологість (%)', data: indoorsH, borderColor: 'transparent', backgroundColor: 'rgba(234,88,12,0.36)', yAxisID: 'yTemp', pointRadius: 0, spanGaps: true, fill: '-1' },
+                { label: 'Різниця газу (м³)', data: gasDiffPoints, borderColor: '#667eea', backgroundColor: 'rgba(102,126,234,0.05)', yAxisID: 'yGas', tension: 0.2, pointRadius: 3 }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    type: 'time',
+                    time: { tooltipFormat: 'dd.MM.yyyy HH:mm', displayFormats: { hour: 'dd.MM HH:mm', day: 'dd.MM' } },
+                    distribution: 'linear'
+                },
+                yTemp: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Темп. / Вологість (одна вісь)' } },
+                yGas: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Різниця газу (м³)' } }
+            },
+            plugins: {
+                legend: { position: 'top' },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const lab = context.dataset.label || '';
+                            if (/волог/i.test(lab)) return lab + ': ' + (context.parsed.y !== null ? context.parsed.y + '%' : 'Н/Д');
+                            if (/Темп|темп/i.test(lab)) return lab + ': ' + (context.parsed.y !== null ? context.parsed.y + '°C' : 'Н/Д');
+                            return lab + ': ' + (context.parsed.y !== null ? context.parsed.y : 'Н/Д');
+                        }
+                    }
+                }
+            },
+            interaction: { mode: 'index', intersect: false }
+        }
+    });
+}
+} // <-- Додаємо цю дужку для завершення class GasMonitor
+
+// --- ДОДАНО: ініціалізація класу та запуск ---
+window.addEventListener('DOMContentLoaded', () => {
+    // Чекаємо, поки window.db буде визначено (ініціалізовано у index.html)
+    function tryInitGasMonitor() {
+        if (window.db) {
+            window.gasMonitor = new GasMonitor();
+            if (window.gasMonitor && typeof window.gasMonitor.init === 'function') {
+                window.gasMonitor.init();
+            }
+        } else {
+            // Спробувати ще раз через 50мс
+            setTimeout(tryInitGasMonitor, 50);
+        }
+    }
+    tryInitGasMonitor();
 });

@@ -5,116 +5,71 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Моніторинг показників газу та температури</title>
     <link rel="stylesheet" href="styles.css">
-    <!-- Адаптивні стилі — підлаштування під ширину екрану мобільних пристроїв -->
+    <!-- Стилі — мобільний перший підхід, покращений дизайн без зміни DOM -->
     <style>
-        *, *::before, *::after { box-sizing: border-box; }
-
-        .container {
-            width: 100%;
-            max-width: 980px;
-            margin: 0 auto;
-            padding: 12px;
+        :root{
+            --bg: #f6f9fc;
+            --card: #ffffff;
+            --muted: #6b7280;
+            --accent: #2563eb; /* blue-600 */
+            --accent-weak: rgba(37,99,235,0.08);
+            --success: #16a34a;
+            --danger: #dc2626;
+            --glass: rgba(255,255,255,0.6);
         }
 
-        /* збільшені підписи на 20% */
-        .input-group { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-        .input-group label { min-width: 120px; font-size: 1.2em; }
+        /* Базові скини */
+        *{box-sizing:border-box}
+        html,body{height:100%;margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,'Noto Sans',sans-serif;color:#0f172a;background:linear-gradient(180deg,#eef2ff 0%, #f8fafc 100%);-webkit-font-smoothing:antialiased}
 
-        .input-group input {
-            flex: 1 1 auto;
-            max-width: 100%;
-        }
-
-        /* Збільшити видимий шрифт у полі дати (перший інпут) */
-        #date {
-            font-size: 1.25em;
-            font-weight: 600;
-            padding: 6px 8px;
+        .container{
+            max-width:980px;margin:18px auto;padding:14px;border-radius:12px;background:var(--card);box-shadow:0 6px 22px rgba(15,23,42,0.06);
         }
 
-        .table-wrapper { overflow-x: auto; }
-        /* таблиця тепер адаптивна: дозволяємо злами тексту, прибираємо мінімальну ширину */
-        table { width: 100%; border-collapse: collapse; min-width: 0; table-layout: fixed; }
-        /* Загальний менший шрифт у секції історії (заголовки і клітинки) */
-        .table-section table,
-        .table-section table th,
-        .table-section table td {
-            font-size: 0.8em; /* зменшено */
-        }
-        table th, table td { word-break: break-word; white-space: normal; }
-        /* Змінити розмір заголовків окремо при потребі */
-        .table-section table thead th { font-size: 0.85em; }
+        header h1{font-size:1.25rem;margin:0 0 8px 0;color:#0b1223;font-weight:700}
+        h2{font-size:1rem;margin:0 0 8px 0;color:#0b1223}
 
-        /* Збільшити ширину стовпця "Дата" (2-й стовпець) */
-        .table-section table th:nth-child(2),
-        .table-section table td:nth-child(2) {
-            width: 220px;
-            max-width: 300px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
+        /* Форма */
+        .form-section{margin-bottom:12px}
+        .input-group{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+        .input-group label{min-width:110px;font-weight:600;color:var(--muted)}
+        .input-group input{flex:1;padding:8px 10px;border:1px solid #e6edf3;border-radius:8px;font-size:0.95rem}
+        #date{font-weight:700}
 
-        /* підвищений блок графіка (на +50% від попередньої версії — 640px -> 960px) */
-        .chart-container { width: 100%; height: 500px; }
-        .chart-container canvas { width: 100% !important; height: 100% !important; display: block; }
+        /* Кнопки */
+        .submit-btn{background:linear-gradient(180deg,var(--accent),#1d4ed8);color:#fff;border:none;padding:8px 12px;border-radius:10px;cursor:pointer;font-weight:600;box-shadow:0 6px 18px rgba(37,99,235,0.12);transition:transform .12s ease,box-shadow .12s ease}
+        .submit-btn:hover{transform:translateY(-1px);box-shadow:0 10px 24px rgba(37,99,235,0.14)}
+        .submit-btn:active{transform:translateY(0)}
 
-        .submit-btn, .delete-btn, input[type="number"], input[type="date"] {
-            max-width: 50%;
-            font-size: 0.7em; /* кнопки та полi вводу теж збільшені */
-        }
+        /* Toggle button - subtle variant */
+        #toggleShowAll{background:transparent;color:var(--accent);border:1px solid var(--accent);padding:6px 10px;border-radius:999px;font-weight:700}
+        #toggleShowAll[aria-pressed="true"]{background:var(--accent);color:#fff}
 
-        /* Зменшити висоту рядків таблиці в секції Історія показників */
-        .table-section table th,
-        .table-section table td {
-            padding: 4px 6px;
-            line-height: 1.1;
-            vertical-align: middle;
-        }
-        .table-section table thead th {
-            padding-top: 6px;
-            padding-bottom: 6px;
-        }
-        .table-section table tr {
-            /* за замовчуванням висота буде підконтентна, але обмежимо мінімум */
-            min-height: 28px;
-        }
+        /* Картки графіків */
+        .chart-container{width:100%;height:420px;border-radius:10px;padding:8px;background:linear-gradient(180deg,var(--glass),#fff)}
+        .chart-container canvas{width:100%!important;height:100%!important;display:block}
 
-        /* Стиль для кнопки-іконки видалення (червоний хрестик) */
-        .delete-btn {
-            background: transparent;
-            border: none;
-            color: #e53e3e;
-            font-size: 1.1em;
-            line-height: 1;
-            padding: 2px 6px;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 3px;
-        }
-        .delete-btn:hover {
-            background: rgba(229,62,62,0.08);
-        }
-        .delete-btn:active {
-            transform: translateY(1px);
-        }
+        /* Таблиці */
+        .table-wrapper{overflow:auto;border-radius:8px}
+        table{width:100%;border-collapse:separate;border-spacing:0 6px;font-size:0.95rem}
+        thead th{background:transparent;text-align:left;padding:8px 12px;color:var(--muted);font-weight:700}
+        tbody td{background:#fff;padding:10px 12px;border-bottom:1px solid rgba(15,23,42,0.03)}
+        tbody tr{border-radius:6px}
 
-        @media (max-width: 600px) {
-            /* компактніші відступи/підписи на мобільних, щоб все вміщалося по ширині */
-            .container { padding: 8px; }
-            .input-group { flex-direction: column; align-items: stretch; gap: 6px; }
-            .input-group label { min-width: 0; margin-bottom: 6px; font-size: 1.05em; }
-            /* мобільна висота графіка теж +50% від попередньої мобільної (440px -> 660px) */
-            .chart-container { height: 560px; }
-            table { min-width: 0; }
-           /* на мобільних трохи зменшити ширину колонки дати, але залишити більшу ніж інші */
-           .table-section table th:nth-child(2),
-           .table-section table td:nth-child(2) {
-               width: 140px;
-               white-space: nowrap;
-           }
+        /* Видалення та інші кнопки */
+        .delete-btn{background:transparent;border:1px solid rgba(229,62,62,0.08);color:var(--danger);padding:6px;border-radius:8px;cursor:pointer}
+
+        /* Мобільні специфічні налаштування */
+        @media (max-width:600px){
+            .container{margin:10px;padding:12px}
+            header h1{font-size:1.05rem}
+            .input-group{flex-direction:column;align-items:stretch}
+            .input-group label{min-width:0;margin-bottom:6px;font-size:0.95rem}
+            #date{font-size:1.05rem}
+            .chart-container{height:520px;padding:6px}
+            .submit-btn{padding:8px 10px;font-size:0.95rem}
+            table{font-size:0.9rem}
+            thead th:nth-child(2),tbody td:nth-child(2){width:140px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         }
     </style>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

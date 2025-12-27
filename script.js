@@ -15,8 +15,9 @@ class GasMonitor {
         this.defaultDays = 15;
         this.detailChartInstance = null;
 
-        // ДОДАНО: масив для сирих даних з сенсорів та підписка на onSnapshot
-        this.sensorData = [];        // { ts: number, indoor_t: number, outdoor_t: number }
+    // ДОДАНО: масив для сирих даних з сенсорів та підписка на onSnapshot
+    // ts зберігається як Date (UTC), але при зчитуванні віднімаємо 1 годину
+    this.sensorData = [];        // { ts: Date, indoor_t: number, outdoor_t: number }
         this.sensorUnsubscribe = null;
     }
 
@@ -59,6 +60,7 @@ class GasMonitor {
                 e.preventDefault();
                 this.showAll = !this.showAll;
                 updateToggleText();
+                console.debug('[GasMonitor] toggleShowAll clicked, showAll=', this.showAll);
                 // Оновити графік
                 this.render();
             });
@@ -569,15 +571,17 @@ class GasMonitor {
 						const outdoor_h = (d.outdoor_h !== undefined && d.outdoor_h !== null && !isNaN(Number(d.outdoor_h))) ? Number(d.outdoor_h) : null;
 						const indoor_h  = (d.indoor_h  !== undefined && d.indoor_h  !== null && !isNaN(Number(d.indoor_h)))  ? Number(d.indoor_h)  : null;
 
-						arr.push({
-							id: doc.id,
-							// зберігаємо Date об'єкт (не number)
-							ts: new Date(ts),
-							indoor_t: (d.indoor_t !== undefined) ? Number(d.indoor_t) : null,
-							outdoor_t: (d.outdoor_t !== undefined) ? Number(d.outdoor_t) : null,
-							indoor_h,
-							outdoor_h
-						});
+                        // Віднімаємо 1 годину (3600000 ms) від часу, що зчитано зі sensor_data
+                        const adjustedTs = (typeof ts === 'number') ? (ts - 3600000) : ts;
+                        arr.push({
+                            id: doc.id,
+                            // зберігаємо Date об'єкт (не number) — з корекцією на 1 годину
+                            ts: new Date(adjustedTs),
+                            indoor_t: (d.indoor_t !== undefined) ? Number(d.indoor_t) : null,
+                            outdoor_t: (d.outdoor_t !== undefined) ? Number(d.outdoor_t) : null,
+                            indoor_h,
+                            outdoor_h
+                        });
 					}
 				});
 				this.sensorData = arr.sort((a,b) => a.ts - b.ts);
@@ -647,9 +651,18 @@ class GasMonitor {
         distribution: 'linear'
     };
     if (!this.showAll && typeof cutoffDate !== 'undefined' && cutoffDate && lastDate) {
-        xAxisOptions.min = cutoffDate;
-        xAxisOptions.max = lastDate;
+        // Передаємо числові мітки часу — надійніше для Chart.js
+        try {
+            xAxisOptions.min = cutoffDate.getTime();
+            xAxisOptions.max = lastDate.getTime();
+        } catch (e) {
+            xAxisOptions.min = cutoffDate;
+            xAxisOptions.max = lastDate;
+        }
     }
+
+    // DEBUG: виведемо значення, щоб відстежити, що передається в Chart.js
+    console.debug('[GasMonitor] renderChart: showAll=', this.showAll, 'cutoffDate=', cutoffDate, 'lastDate=', lastDate, 'gasPoints=', gasPoints.length);
 
     window.gasChartInstance = new Chart(ctx, {
 		type: 'line',
@@ -708,6 +721,13 @@ class GasMonitor {
 			}
 		}
 	});
+    // DEBUG: перевіримо фактичні значення осі після створення графіку
+    try {
+        console.debug('[GasMonitor] Chart x axis options (options.scales.x):', window.gasChartInstance.options.scales.x);
+        if (window.gasChartInstance.scales && window.gasChartInstance.scales.x) {
+            console.debug('[GasMonitor] Chart scale x values (scale.min/max):', window.gasChartInstance.scales.x.min, window.gasChartInstance.scales.x.max);
+        }
+    } catch (e) { console.warn('[GasMonitor] Помилка при читанні властивостей Chart:', e); }
 	// ...existing surrounding code...
 }
 

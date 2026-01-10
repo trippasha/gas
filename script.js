@@ -934,11 +934,21 @@ renderDetailedChart(periodDays = 7) {
             .filter(p => p.x.getTime() >= cutoff && p.x.getTime() <= lastTs && p.y !== null && !isNaN(p.y));
     }
 
-    // Обчислюємо різниці між послідовними газовими точками (тільки для відфільтрованих)
+    // Обчислюємо різниці між послідовними газовими точками.
+    // Важливо: для першої точки у видимому періоді використовуємо попереднє вимірювання,
+    // навіть якщо воно поза періодом (щоб перша точка не була завжди 0).
     const gasDiffPoints = [];
-    for (let i = 0; i < gasPoints.length; i++) {
-        if (i === 0) gasDiffPoints.push({ x: gasPoints[i].x, y: 0 });
-        else gasDiffPoints.push({ x: gasPoints[i].x, y: gasPoints[i].y - gasPoints[i-1].y });
+    // Переконаємось, що всі газові точки відсортовані за часом
+    const sortedGasAll = gasPointsAll.slice().sort((a,b) => a.x.getTime() - b.x.getTime());
+    for (let i = 0; i < sortedGasAll.length; i++) {
+        const p = sortedGasAll[i];
+        const t = p.x.getTime();
+        if (t < cutoff || t > lastTs) continue; // лише точки у періоді
+        let diff = 0;
+        if (i > 0 && typeof sortedGasAll[i-1].y === 'number' && typeof p.y === 'number') {
+            diff = p.y - sortedGasAll[i-1].y;
+        }
+        gasDiffPoints.push({ x: p.x, y: parseFloat(diff.toFixed(2)) });
     }
 
     if (this.detailChartInstance) this.detailChartInstance.destroy();

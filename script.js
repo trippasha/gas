@@ -532,7 +532,15 @@ class GasMonitor {
                 }
             } catch (err) { dateKey = null; }
 
-            const tempDisplay = (dateKey && map[dateKey] && map[dateKey].outdoorAvg !== null) ? (map[dateKey].outdoorAvg + '°C') : 'Н/Д';
+            // В першу чергу показуємо температуру з API (якщо завантажена), інакше фолбек на обчислену середню
+            let tempDisplay = 'Н/Д';
+            if (dateKey) {
+                if (this.externalTempsLoaded && this.externalTemps && (this.externalTemps[dateKey] !== undefined && this.externalTemps[dateKey] !== null)) {
+                    tempDisplay = `${this.externalTemps[dateKey]}°C`;
+                } else if (map[dateKey] && map[dateKey].outdoorAvg !== null) {
+                    tempDisplay = `${map[dateKey].outdoorAvg}°C`;
+                }
+            }
 
             row.innerHTML = `
                 <td class="${differenceClass}">${entry.difference}</td>

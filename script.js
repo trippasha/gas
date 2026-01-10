@@ -19,7 +19,53 @@ class GasMonitor {
     // ts зберігається як Date (UTC), але при зчитуванні віднімаємо 1 годину
     this.sensorData = [];        // { ts: Date, indoor_t: number, outdoor_t: number }
         this.sensorUnsubscribe = null;
+    // external temps from API: dateStr -> temp
+    this.externalTemps = {};
+    this.externalTempsLoaded = false;
     }
+
+    // Завантажити середні добові температури із Open-Meteo archive API
+    async loadExternalDailyTemps() {
+        try {
+            // Фіксована start_date як у прикладі, end_date — вчора відносно локальної дати
+            const startDate = '2025-11-23';
+            const y = new Date();
+            y.setDate(y.getDate() - 1);
+            const endDate = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2,'0')}-${String(y.getDate()).padStart(2,'0')}`;
+
+            const lat = '49.805233';
+            const lon = '24.147206';
+            const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&start_date=${startDate}&end_date=${endDate}&daily=temperature_2m_mean&timezone=auto`;
+
+            console.debug('[GasMonitor] loadExternalDailyTemps: fetching', url);
+            const resp = await fetch(url);
+            if (!resp.ok) {
+                console.warn('[GasMonitor] loadExternalDailyTemps: fetch failed', resp.status, resp.statusText);
+                this.externalTemps = {};
+                this.externalTempsLoaded = false;
+                return;
+            }
+
+            const data = await resp.json();
+            const times = (data && data.daily && data.daily.time) || [];
+            const temps = (data && data.daily && data.daily.temperature_2m_mean) || [];
+
+            this.externalTemps = {};
+            for (let i = 0; i < Math.min(times.length, temps.length); i++) {
+                const t = times[i];
+                const v = temps[i];
+                this.externalTemps[t] = (v === null || v === undefined) ? null : Number(v);
+            }
+            this.externalTempsLoaded = Object.keys(this.externalTemps).length > 0;
+            console.debug('[GasMonitor] loadExternalDailyTemps: loaded days=', Object.keys(this.externalTemps).length);
+            // Перерендеримо, щоб графіки оновились
+            this.render();
+        } catch (err) {
+            console.error('[GasMonitor] loadExternalDailyTemps error:', err);
+            this.externalTemps = {};
+            this.externalTempsLoaded = false;
+        }
+    }
 
     async init() {
         // Встановити дату
@@ -30,6 +76,9 @@ class GasMonitor {
 
         // 2) Завантажуємо дані газу
         await this.loadGasDataFromFirebase();
+
+        // 2.5) Завантажуємо зовнішні середні температури з Open-Meteo (archive)
+        await this.loadExternalDailyTemps();
 
         // 3) Слухачі та рендер
         this.setupEventListeners();
@@ -227,24 +276,46 @@ class GasMonitor {
         const considered = allData.slice(excludeCount);
 
         if (!considered || considered.length === 0) {
+            console.debug('[GasMonitor] computeSummaryMetrics: not enough considered records, allData.length=', allData.length);
             return { totalUsed, avgPerDay: 0, days: 0, firstDate: null, lastDate: null };
         }
 
         // Обчислимо часовий інтервал між першою та останньою точками у розглянутому наборі
-        const parseDate = (e) => {
-            if (e.timestamp instanceof Date) return e.timestamp.getTime();
-            try { const d = new Date(e.date); return isNaN(d.getTime()) ? null : d.getTime(); } catch (er) { return null; }
+        const tryParseDate = (e) => {
+            if (e && e.timestamp instanceof Date) return e.timestamp.getTime();
+            if (!e) return null;
+            // Спроби парсингу — кілька форматів, щоб покрити мобільні браузери
+            let t = null;
+            try {
+                const d1 = new Date(e.date);
+                if (!isNaN(d1.getTime())) return d1.getTime();
+            } catch (err) { /* ignore */ }
+            try {
+                const d2 = new Date(String(e.date) + 'T00:00:00');
+                if (!isNaN(d2.getTime())) return d2.getTime();
+            } catch (err) { /* ignore */ }
+            try {
+                const p = Date.parse(e.date);
+                if (!isNaN(p)) return p;
+            } catch (err) { /* ignore */ }
+            return t;
         };
 
-        const times = considered.map(parseDate).filter(t => t !== null).sort((a,b)=>a-b);
-        if (times.length === 0) return { totalUsed, avgPerDay: 0, days: 0, firstDate: null, lastDate: null };
+        const times = considered.map(tryParseDate).filter(t => t !== null).sort((a,b)=>a-b);
+        // Якщо часів не знайдено (біда з парсингом на мобільному), використаємо запасний підхід: days = кількість записів
+        if (times.length === 0) {
+            const consideredTotal = considered.reduce((acc,e) => acc + (e.difference > 0 ? Number(e.difference) : 0), 0);
+            const days = Math.max(1, considered.length);
+            console.debug('[GasMonitor] computeSummaryMetrics: fallback days used=', days, 'considered.length=', considered.length);
+            return { totalUsed, avgPerDay: consideredTotal / days, days, firstDate: null, lastDate: null };
+        }
 
         const first = times[0];
         const last = times[times.length - 1];
         // кількість діб (округлюємо вгору, щоб часткова доба враховувалась як повна)
-    const days = Math.max(1, Math.ceil((last - first) / (24 * 60 * 60 * 1000)));
-    const consideredTotal = considered.reduce((acc,e) => acc + (e.difference > 0 ? Number(e.difference) : 0), 0);
-    const avgPerDay = consideredTotal / days;
+        const days = Math.max(1, Math.ceil((last - first) / (24 * 60 * 60 * 1000)));
+        const consideredTotal = considered.reduce((acc,e) => acc + (e.difference > 0 ? Number(e.difference) : 0), 0);
+        const avgPerDay = consideredTotal / days;
 
         return { totalUsed, avgPerDay, days, firstDate: new Date(first), lastDate: new Date(last) };
     }
@@ -255,6 +326,7 @@ class GasMonitor {
         if (!elTotal || !elAvg) return;
 
         const { totalUsed, avgPerDay, days, firstDate, lastDate } = this.computeSummaryMetrics();
+        console.debug('[GasMonitor] updateSummary:', { totalUsed, avgPerDay, days, firstDate, lastDate });
 
         elTotal.textContent = (totalUsed !== null && !isNaN(totalUsed)) ? `${totalUsed.toFixed(2)} м³` : '—';
         elAvg.textContent = (avgPerDay !== null && !isNaN(avgPerDay)) ? `${avgPerDay.toFixed(2)} м³/доба` : '—';
@@ -437,16 +509,30 @@ class GasMonitor {
     const startIndex = Math.max(0, allData.length - 5);
     console.debug('[GasMonitor] renderTable: allData.length=', allData.length, 'startIndex=', startIndex);
 
-        allData.forEach((entry, index) => {
-            if (index < startIndex) return; // пропустити старіші записи
+        const visible = allData.slice(startIndex);
+        console.debug('[GasMonitor] renderTable: visible.length=', visible.length, 'showing indexes', startIndex, '->', allData.length - 1);
+
+        visible.forEach((entry, idx) => {
+            const index = startIndex + idx; // оригінальний індекс у allData
             const row = document.createElement('tr');
             
             const differenceClass = entry.difference > 0 ? 'difference-positive' : 
                                   entry.difference < 0 ? 'difference-negative' : 'difference-zero';
             
             const isDeletable = index >= initialDataLength;
-            const dateKey = (new Date(entry.date)).toISOString().split('T')[0];
-            const tempDisplay = (map[dateKey] && map[dateKey].outdoorAvg !== null) ? (map[dateKey].outdoorAvg + '°C') : 'Н/Д';
+            // Робимо парсинг дати охайно — на мобільних браузерах деякі формати можуть бути невалідні
+            let dateKey = null;
+            try {
+                if (entry.date) {
+                    const dd = new Date(entry.date);
+                    if (!isNaN(dd.getTime())) dateKey = dd.toISOString().split('T')[0];
+                }
+                if (!dateKey && entry.timestamp instanceof Date) {
+                    dateKey = entry.timestamp.toISOString().split('T')[0];
+                }
+            } catch (err) { dateKey = null; }
+
+            const tempDisplay = (dateKey && map[dateKey] && map[dateKey].outdoorAvg !== null) ? (map[dateKey].outdoorAvg + '°C') : 'Н/Д';
 
             row.innerHTML = `
                 <td class="${differenceClass}">${entry.difference}</td>
@@ -636,19 +722,23 @@ class GasMonitor {
 
                         // Віднімаємо 1 годину (3600000 ms) від часу, що зчитано зі sensor_data
                         const adjustedTs = (typeof ts === 'number') ? (ts - 3600000) : ts;
+                        // Додаємо 22 до всіх indoor_h значень відповідно до запиту
+                        const indoor_h_adj = (indoor_h !== null && !isNaN(indoor_h)) ? (Number(indoor_h) + 22) : null;
                         arr.push({
                             id: doc.id,
                             // зберігаємо Date об'єкт (не number) — з корекцією на 1 годину
                             ts: new Date(adjustedTs),
                             indoor_t: (d.indoor_t !== undefined) ? Number(d.indoor_t) : null,
                             outdoor_t: (d.outdoor_t !== undefined) ? Number(d.outdoor_t) : null,
-                            indoor_h,
+                            indoor_h: indoor_h_adj,
                             outdoor_h
                         });
 					}
 				});
-				this.sensorData = arr.sort((a,b) => a.ts - b.ts);
-				this.render();
+                this.sensorData = arr.sort((a,b) => a.ts - b.ts);
+                const adjustedCount = this.sensorData.filter(r => r.indoor_h !== null).length;
+                console.debug('[GasMonitor] loadSensorDataFromFirebase: sensor records=', this.sensorData.length, 'indoor_h_adjusted_count=', adjustedCount);
+                this.render();
 			}, (err) => {
 				console.error("Помилка підписки sensor_data:", err);
 			});
@@ -696,11 +786,19 @@ class GasMonitor {
         return { x, y: e.difference, raw: e };
     }).filter(p => p.x !== null);
 
-    // середні зовнішні по датах — конвертуємо у точки (взяти часову точку на початок дня)
-    const avgPoints = Object.keys(map).map(dateStr => {
-        const dateObj = new Date(dateStr + 'T00:00:00');
-        return { x: dateObj, y: map[dateStr].outdoorAvg };
-    }).filter(p => p.y !== null);
+    // середні зовнішні по датах — перевага: зовнішні дані з API, якщо доступні
+    let avgPoints = [];
+    if (this.externalTempsLoaded && this.externalTemps) {
+        avgPoints = Object.keys(this.externalTemps).map(dateStr => {
+            const dateObj = new Date(dateStr + 'T00:00:00');
+            return { x: dateObj, y: this.externalTemps[dateStr] };
+        }).filter(p => p.y !== null && !isNaN(p.y));
+    } else {
+        avgPoints = Object.keys(map).map(dateStr => {
+            const dateObj = new Date(dateStr + 'T00:00:00');
+            return { x: dateObj, y: map[dateStr].outdoorAvg };
+        }).filter(p => p.y !== null);
+    }
 
     if (window.gasChartInstance) window.gasChartInstance.destroy();
 
@@ -811,8 +909,7 @@ renderDetailedChart(periodDays = 7) {
     // Побудова x/y точок (Chart.js time-ось: {x: Date, y: value})
     const toPoint = (p, field) => ({ x: p.ts, y: (p[field] !== null && p[field] !== undefined) ? p[field] : null });
 
-    const outdoorsT = filtered.map(p => toPoint(p, 'outdoor_t'));
-    const outdoorsH = filtered.map(p => toPoint(p, 'outdoor_h'));
+    // Видаляємо зовнішню температуру, виміряну датчиком (не використовується у графіку)
     const indoorsT  = filtered.map(p => toPoint(p, 'indoor_t'));
     const indoorsH  = filtered.map(p => toPoint(p, 'indoor_h'));
 
@@ -830,6 +927,13 @@ renderDetailedChart(periodDays = 7) {
     // Фільтруємо газові точки по періоду (cutoff..lastTs)
     const gasPoints = gasPointsAll.filter(p => (p.x.getTime() >= cutoff && p.x.getTime() <= lastTs));
 
+    // Додатково: середні зовнішні добові температури з API для детального графіка
+    let externalDailyPoints = [];
+    if (this.externalTempsLoaded && this.externalTemps) {
+        externalDailyPoints = Object.keys(this.externalTemps).map(dateStr => ({ x: new Date(dateStr + 'T00:00:00'), y: this.externalTemps[dateStr] }))
+            .filter(p => p.x.getTime() >= cutoff && p.x.getTime() <= lastTs && p.y !== null && !isNaN(p.y));
+    }
+
     // Обчислюємо різниці між послідовними газовими точками (тільки для відфільтрованих)
     const gasDiffPoints = [];
     for (let i = 0; i < gasPoints.length; i++) {
@@ -844,8 +948,9 @@ renderDetailedChart(periodDays = 7) {
         type: 'line',
         data: {
             datasets: [
-                { label: 'Зовнішня темп. (°C)', data: outdoorsT, borderColor: '#0ea5a4', backgroundColor: 'rgba(14,165,164,0.04)', yAxisID: 'yTemp', pointRadius: 2, spanGaps: true },
-                { label: 'Зовнішня вологість (%)', data: outdoorsH, borderColor: 'transparent', backgroundColor: 'rgba(96,165,250,0.36)', yAxisID: 'yTemp', pointRadius: 0, spanGaps: true, fill: '-1' },
+                // видалено: зовнішня температура з датчика (outdoorsT) - не показуємо
+                // API daily mean temperatures (if available)
+                { label: 'Середня зовнішня темп. (API) (°C)', data: externalDailyPoints, borderColor: '#06b6d4', backgroundColor: 'rgba(6,182,212,0.06)', yAxisID: 'yTemp', pointRadius: 3, borderDash: [4,2], spanGaps: true, fill: false },
                 { label: 'Внутрішня темп. (°C)', data: indoorsT, borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.04)', yAxisID: 'yTemp', pointRadius: 2, spanGaps: true },
                 { label: 'Внутрішня вологість (%)', data: indoorsH, borderColor: 'transparent', backgroundColor: 'rgba(234,88,12,0.36)', yAxisID: 'yTemp', pointRadius: 0, spanGaps: true, fill: '-1' },
                 { label: 'Різниця газу (м³)', data: gasDiffPoints, borderColor: '#667eea', backgroundColor: 'rgba(102,126,234,0.05)', yAxisID: 'yGas', tension: 0.2, pointRadius: 3 }

@@ -31,6 +31,8 @@
 
         /* Форма */
         .form-section{margin-bottom:12px}
+    .summary{display:flex;gap:12px;margin-bottom:8px}
+    .summary .card{flex:1;min-width:0}
         .input-group{display:flex;gap:10px;align-items:center;margin-bottom:10px}
         .input-group label{min-width:110px;font-weight:600;color:var(--muted)}
         .input-group input{flex:1;padding:8px 10px;border:1px solid #e6edf3;border-radius:8px;font-size:0.95rem}
@@ -63,6 +65,7 @@
         @media (max-width:600px){
             .container{margin:10px;padding:12px}
             header h1{font-size:1.05rem}
+            .summary{flex-direction:column}
             .input-group{flex-direction:column;align-items:stretch}
             .input-group label{min-width:0;margin-bottom:6px;font-size:0.95rem}
             #date{font-size:1.05rem}
@@ -85,6 +88,19 @@
         </header>
 
         <main>
+            <!-- Коротка статистика: загальне використання та середня витрата на добу (без перших 4 записів) -->
+            <section class="summary-section" style="margin-bottom:12px;">
+                <div class="summary">
+                    <div class="card" style="padding:10px;border-radius:8px;background:linear-gradient(180deg,#ffffff,#f8fafc);box-shadow:0 4px 12px rgba(15,23,42,0.04)">
+                        <div style="font-size:0.85rem;color:var(--muted);">Використано з початку (м³)</div>
+                        <div id="summaryTotalUsed" style="font-size:1.25rem;font-weight:800;color:#0b1223;">—</div>
+                    </div>
+                    <div class="card" style="padding:10px;border-radius:8px;background:linear-gradient(180deg,#ffffff,#f8fafc);box-shadow:0 4px 12px rgba(15,23,42,0.04)">
+                        <div style="font-size:0.85rem;color:var(--muted);">Середня витрата (м³/доба)</div>
+                        <div id="summaryAvgPerDay" style="font-size:1.25rem;font-weight:800;color:#0b1223;">—</div>
+                    </div>
+                </div>
+            </section>
             <section class="form-section">
                 <h2>1. Додати новий показник</h2>
                 <form id="dataForm">
@@ -135,7 +151,7 @@
             </section>
 
             <section class="table-section">
-                <h2>3. Історія показників</h2>
+                <h2>3. Історія показників (5 крайніх)</h2>
                 <div class="table-wrapper">
                     <table>
                         <thead>

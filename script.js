@@ -203,6 +203,8 @@ class GasMonitor {
     
     // Викликається після loadGasDataFromFirebase
     render() {
+        // Оновити коротку статистику перед рендером таблиці/графіків
+        this.updateSummary();
         this.renderTable();
         this.renderChart();
         // Якщо зараз відкрито детальний таб — оновимо його також
@@ -210,6 +212,59 @@ class GasMonitor {
         if (detailPanel && detailPanel.style.display !== 'none') {
             // залишимо період 7 днів для оновлення
             this.renderDetailedChart(7);
+        }
+    }
+
+    // Повертає сумарне використання та середню витрату на добу,
+    // загальне використання рахуємо за ВСІМИ показниками, середню — без перших 4 записів
+    computeSummaryMetrics() {
+        const allData = this.getAllData() || [];
+        const excludeCount = 4; // не враховуємо перші 4 для середньої
+
+        // Сумуємо загальне використання по всіх записах (тільки позитивні дельти)
+        const totalUsed = allData.reduce((acc, e) => acc + (e.difference > 0 ? Number(e.difference) : 0), 0);
+
+        const considered = allData.slice(excludeCount);
+
+        if (!considered || considered.length === 0) {
+            return { totalUsed, avgPerDay: 0, days: 0, firstDate: null, lastDate: null };
+        }
+
+        // Обчислимо часовий інтервал між першою та останньою точками у розглянутому наборі
+        const parseDate = (e) => {
+            if (e.timestamp instanceof Date) return e.timestamp.getTime();
+            try { const d = new Date(e.date); return isNaN(d.getTime()) ? null : d.getTime(); } catch (er) { return null; }
+        };
+
+        const times = considered.map(parseDate).filter(t => t !== null).sort((a,b)=>a-b);
+        if (times.length === 0) return { totalUsed, avgPerDay: 0, days: 0, firstDate: null, lastDate: null };
+
+        const first = times[0];
+        const last = times[times.length - 1];
+        // кількість діб (округлюємо вгору, щоб часткова доба враховувалась як повна)
+    const days = Math.max(1, Math.ceil((last - first) / (24 * 60 * 60 * 1000)));
+    const consideredTotal = considered.reduce((acc,e) => acc + (e.difference > 0 ? Number(e.difference) : 0), 0);
+    const avgPerDay = consideredTotal / days;
+
+        return { totalUsed, avgPerDay, days, firstDate: new Date(first), lastDate: new Date(last) };
+    }
+
+    updateSummary() {
+        const elTotal = document.getElementById('summaryTotalUsed');
+        const elAvg = document.getElementById('summaryAvgPerDay');
+        if (!elTotal || !elAvg) return;
+
+        const { totalUsed, avgPerDay, days, firstDate, lastDate } = this.computeSummaryMetrics();
+
+        elTotal.textContent = (totalUsed !== null && !isNaN(totalUsed)) ? `${totalUsed.toFixed(2)} м³` : '—';
+        elAvg.textContent = (avgPerDay !== null && !isNaN(avgPerDay)) ? `${avgPerDay.toFixed(2)} м³/доба` : '—';
+
+        if (firstDate && lastDate) {
+            elTotal.title = `Період: ${firstDate.toLocaleDateString('uk-UA')} — ${lastDate.toLocaleDateString('uk-UA')}`;
+            elAvg.title = `Розраховано за ${days} дн.`;
+        } else {
+            elTotal.title = '';
+            elAvg.title = '';
         }
     }
 
@@ -243,7 +298,7 @@ class GasMonitor {
     }
     
     // Показує повідомлення "Дякую Мамо" під формою на кілька секунд
-    showThankYou(durationMs = 3000) {
+    showThankYou(durationMs = 5000) {
         const form = document.getElementById('dataForm');
         if (!form) return;
 
@@ -265,7 +320,44 @@ class GasMonitor {
             form.appendChild(msg);
         }
 
-        msg.textContent = 'Дякую Мамо';
+        const phrases = [
+            "Дякую, рідненька, показники прийнято!",
+            "Ви найкраща помічниця у світі, матусю!",
+            "Дякую, мамо! Ваша турбота зігріває краще за газ.",
+            "Отримав! Дякую, що Ви завжди пам’ятаєте.",
+            "Мамо, Ви — моє сонечко. Дякую за допомогу!",
+            "Супер! Мама на зв’язку — все збережено.",
+            "Прийнято! Матусю, Ви просто мега-користувач!",
+            "Дякую! З Вами все працює ідеально.",
+            "Все чітко! Дякую за цифри, ма.",
+            "Готово! Ви — професіонал у цій справі.",
+            "Дякую, мамо! Нехай у домі завжди буде тепло.",
+            "Цифри в базі. Відпочивайте, рідна!",
+            "Дякую! Тепер можна і чаю попити.",
+            "Ціную Вашу допомогу, матусю. Обіймаю!",
+            "Все надіслано! Ви справжня берегиня нашого дому.",
+            "Мама — хакер! Показники успішно внесено.",
+            "Місія виконана! Дякую, мамусю.",
+            "Газ під контролем, поки Ви поруч. Дякую!",
+            "Дякую, ма! Ваші показники — найточніші у світі.",
+            "Кінець звітності! Ви молодець, матусю.",
+            "Дякую, мамо! Ви моя головна опора.",
+            "Дані збережено! Дякую за Вашу старанність.",
+            "Як завжди вчасно! Дякую, матусю.",
+            "Ваша допомога неоціненна. Дякую за цифри!",
+            "Дякую, мамо! З Вами жоден куб газу не загубиться.",
+            "Ви — золото! Показники вже в системі.",
+            "Дякую! На душі стає тепліше від Вашої допомоги.",
+            "Все під контролем! Дякую, найкраща мамо у світі.",
+            "Показники прийнято! Ви — взірець відповідальності.",
+            "Дякую, матусю! Нехай цей вечір буде затишним."
+        ];
+
+        // Випадковий вибір однієї фрази з масиву
+        const randomPhrase = phrases[Math.floor(Math.random() * phrases.length)];
+
+        // Інтеграція у вашу змінну
+        msg.textContent = randomPhrase;
         // показати
         requestAnimationFrame(() => { msg.style.opacity = '1'; });
 
@@ -341,7 +433,12 @@ class GasMonitor {
         const initialDataLength = this.getInitialData().length;
         const { map } = this.computeDailyAverages();
 
+    // Відображаємо лише останні 5 рядків історії
+    const startIndex = Math.max(0, allData.length - 5);
+    console.debug('[GasMonitor] renderTable: allData.length=', allData.length, 'startIndex=', startIndex);
+
         allData.forEach((entry, index) => {
+            if (index < startIndex) return; // пропустити старіші записи
             const row = document.createElement('tr');
             
             const differenceClass = entry.difference > 0 ? 'difference-positive' : 
@@ -500,41 +597,7 @@ class GasMonitor {
     
     // ... (setMinDate, setupEventListeners, getInitialData, formatDate залишаються незмінними) ...
     
-    // Виправлений renderTable для коректного відображення ID та кнопки
-    renderTable() {
-        const tbody = document.getElementById('tableBody');
-        if (!tbody) return;
-        tbody.innerHTML = '';
-
-        const allData = this.getAllData();
-        const initialDataLength = this.getInitialData().length;
-        const { map } = this.computeDailyAverages();
-
-        allData.forEach((entry, index) => {
-            const row = document.createElement('tr');
-            
-            const differenceClass = entry.difference > 0 ? 'difference-positive' : 
-                                  entry.difference < 0 ? 'difference-negative' : 'difference-zero';
-            
-            const isDeletable = index >= initialDataLength;
-            const dateKey = (new Date(entry.date)).toISOString().split('T')[0];
-            const tempDisplay = (map[dateKey] && map[dateKey].outdoorAvg !== null) ? (map[dateKey].outdoorAvg + '°C') : 'Н/Д';
-
-            row.innerHTML = `
-                <td class="${differenceClass}">${entry.difference}</td>
-                <td>${this.formatDate(entry.date)}</td>
-                <td>${entry.gasReading}</td>
-                <td>${tempDisplay}</td>
-                <td>
-                    ${isDeletable ? 
-                        `<button class="delete-btn" onclick="gasMonitor.deleteData(${index})" aria-label="Видалити запис">✖</button>` : 
-                        ''
-                    }
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-    }
+    // renderTable визначено вище та обмежує відображення до останніх 5 рядків
 
     // ЗАМІНЕНО: loadSensorDataFromFirebase — зберігаємо ts як Date та читаємо indoor_h/outdoor_h
 	async loadSensorDataFromFirebase() {
